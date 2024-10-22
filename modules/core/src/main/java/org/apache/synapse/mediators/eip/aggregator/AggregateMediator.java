@@ -34,6 +34,7 @@ import org.apache.synapse.ContinuationState;
 import org.apache.synapse.ManagedLifecycle;
 import org.apache.synapse.Mediator;
 import org.apache.synapse.MessageContext;
+import org.apache.synapse.SynapseConstants;
 import org.apache.synapse.SynapseException;
 import org.apache.synapse.SynapseLog;
 import org.apache.synapse.aspects.AspectConfiguration;
@@ -47,6 +48,7 @@ import org.apache.synapse.commons.json.Constants;
 import org.apache.synapse.commons.json.JsonUtil;
 import org.apache.synapse.config.xml.SynapsePath;
 import org.apache.synapse.continuation.ContinuationStackManager;
+import org.apache.synapse.continuation.SeqContinuationState;
 import org.apache.synapse.core.SynapseEnvironment;
 import org.apache.synapse.core.axis2.Axis2MessageContext;
 import org.apache.synapse.mediators.AbstractMediator;
@@ -130,6 +132,11 @@ public class AggregateMediator extends AbstractMediator implements ManagedLifecy
     private boolean isAggregateComplete = false;
 
     private boolean isAggregationMessageCollected = false;
+    private boolean forEachLoop = false;
+
+    public void setForEachLoop(boolean forEachLoop) {
+        this.forEachLoop = forEachLoop;
+    }
 
     public AggregateMediator() {
         try {
@@ -366,7 +373,7 @@ public class AggregateMediator extends AbstractMediator implements ManagedLifecy
 
                 if (aggregate.isComplete(synLog)) {
                     synLog.traceOrDebug("Aggregation completed - invoking onComplete");
-                    boolean onCompleteSeqResult = completeAggregate(aggregate);
+                    boolean onCompleteSeqResult = completeAggregate(aggregate, forEachLoop);
                     synLog.traceOrDebug("End : Aggregate mediator");
                     isAggregateComplete = onCompleteSeqResult;
                     return onCompleteSeqResult;
@@ -449,7 +456,7 @@ public class AggregateMediator extends AbstractMediator implements ManagedLifecy
      * itself
      * @param aggregate the timed out Aggregate that holds collected messages and properties
      */
-    public boolean completeAggregate(Aggregate aggregate) {
+    public boolean completeAggregate(Aggregate aggregate, boolean foreachLoop) {
 
         boolean markedCompletedNow = false;
         boolean wasComplete = aggregate.isCompleted();
@@ -485,6 +492,9 @@ public class AggregateMediator extends AbstractMediator implements ManagedLifecy
         if (!markedCompletedNow) {
             return false;
         }
+//        } else if (markedCompletedNow && foreachLoop) {
+//            return true;
+//        }
         
         MessageContext newSynCtx = getAggregatedMessage(aggregate);
 
@@ -539,8 +549,34 @@ public class AggregateMediator extends AbstractMediator implements ManagedLifecy
                 return newSynCtx.getSequence(onCompleteSequenceRef).mediate(newSynCtx);
 
             } else {
-                handleException("Unable to find the sequence for the mediation " +
-                    "of the aggregated message", newSynCtx);
+//                ContinuationStackManager.updateSeqContinuationState(newSynCtx, getMediatorPosition() + 1);
+//                //First push fault handlers for first continuation state.
+//                SeqContinuationState seqContinuationState = (SeqContinuationState) ContinuationStackManager.peakContinuationStateStack(newSynCtx);
+//                if (seqContinuationState == null) {
+//                    return false;
+//                }
+//                boolean result = false;
+//                do {
+//                    seqContinuationState = (SeqContinuationState) ContinuationStackManager.peakContinuationStateStack(newSynCtx);
+//                    if (seqContinuationState != null) {
+//                        SequenceMediator sequenceMediator = ContinuationStackManager.retrieveSequence(newSynCtx, seqContinuationState);
+//                        //Report Statistics for this continuation call
+//                        result = sequenceMediator.mediate(newSynCtx, seqContinuationState);
+//                        if (RuntimeStatisticCollector.isStatisticsEnabled()) {
+//                            sequenceMediator.reportCloseStatistics(newSynCtx, null);
+//                        }
+//                    } else {
+//                        break;
+//                    }
+//                    //for any result close the sequence as it will be handled by the callback method in statistics
+//                } while (result && !newSynCtx.getContinuationStateStack().isEmpty());
+//                return result;
+                return true;
+//                newSynCtx.setProperty(SynapseConstants.CONTINUATION_CALL, true);
+//                ContinuationStackManager.updateSeqContinuationState(newSynCtx, getMediatorPosition());
+//                return newSynCtx.getEnvironment().injectMessage(newSynCtx, false);
+//                handleException("Unable to find the sequence for the mediation " +
+//                    "of the aggregated message", newSynCtx);
             }
         }
         return false;

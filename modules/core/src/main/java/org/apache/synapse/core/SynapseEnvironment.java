@@ -218,6 +218,7 @@ public interface SynapseEnvironment {
      *  and false if it should be aborted
      */
     public boolean injectMessage(MessageContext smc,SequenceMediator seq);
+    public boolean injectMessage(MessageContext smc,boolean isCall);
 
     /**
      * Get all synapse handlers

@@ -130,7 +130,7 @@ public class FreeMarkerTemplateProcessor extends TemplateProcessor {
             Map<String, Object> data = new HashMap<>();
             int payloadType = getPayloadType(messageContext);
 
-            injectPayloadVariables(messageContext, payloadType, data);
+            injectPayloadVariables(messageContext, payloadType, data, false);
             injectArgs(messageContext, mediaType, data);
             injectProperties(messageContext, data);
 
@@ -147,6 +147,30 @@ public class FreeMarkerTemplateProcessor extends TemplateProcessor {
             handleException("Error reading payload data");
         }
 
+        return "";
+    }
+
+    public String processTemplate(MessageContext messageContext) {
+
+        try {
+            Map<String, Object> data = new HashMap<>();
+            int payloadType = getPayloadType(messageContext);
+
+            injectPayloadVariables(messageContext, payloadType, data, true);
+            injectProperties(messageContext, data);
+
+            Writer out = new StringWriter();
+            freeMarkerTemplate.process(data, out);
+            return out.toString();
+        } catch (IOException e) {
+            handleException("Error parsing FreeMarker template");
+        } catch (StopException e) {
+            handleException(e.getMessage());
+        } catch (TemplateException e) {
+            handleException(generateTemplateErrorMessage(e));
+        } catch (SAXException | ParserConfigurationException e) {
+            handleException("Error reading payload data");
+        }
         return "";
     }
 
@@ -252,14 +276,15 @@ public class FreeMarkerTemplateProcessor extends TemplateProcessor {
      * @throws IOException
      * @throws ParserConfigurationException
      */
-    private void injectPayloadVariables(MessageContext messageContext, int payloadType, Map<String, Object> data)
+    private void injectPayloadVariables(MessageContext messageContext, int payloadType, Map<String, Object> data,
+                                        boolean asString)
             throws SAXException, IOException, ParserConfigurationException {
 
         if (usingPayload) {
             if (payloadType == XML_PAYLOAD_TYPE) {
                 injectXmlPayload(messageContext, data);
             } else if (payloadType == JSON_PAYLOAD_TYPE) {
-                injectJsonPayload((Axis2MessageContext) messageContext, data);
+                injectJsonPayload((Axis2MessageContext) messageContext, data, asString);
             } else if (payloadType == TEXT_PAYLOAD_TYPE) {
                 injectTextPayload(messageContext, data);
             } else {
@@ -274,12 +299,16 @@ public class FreeMarkerTemplateProcessor extends TemplateProcessor {
      * @param messageContext Message context
      * @param data           FreeMarker data input
      */
-    private void injectJsonPayload(Axis2MessageContext messageContext, Map<String, Object> data) {
+    private void injectJsonPayload(Axis2MessageContext messageContext, Map<String, Object> data, boolean asString) {
 
         org.apache.axis2.context.MessageContext axis2MessageContext = messageContext.getAxis2MessageContext();
         String jsonPayloadString = JsonUtil.jsonPayloadToString(axis2MessageContext);
         try {
             JsonElement jsonElement = new JsonParser().parse(jsonPayloadString);
+            if (asString) {
+                data.put(PAYLOAD_INJECTING_NAME, jsonElement);
+                return;
+            }
             if(jsonElement.isJsonObject()){
                 injectJsonObject(data, jsonElement);
             }else if(jsonElement.isJsonArray()){

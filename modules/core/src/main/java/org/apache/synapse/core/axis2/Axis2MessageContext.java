@@ -67,6 +67,10 @@ public class Axis2MessageContext implements MessageContext {
      * Synapse Message Context properties
      */
     private final Map<String, Object> properties = new HashMap<String, Object>();
+    /**
+     * Synapse Message Context variables
+     */
+    private final Map<String, Object> variables = new HashMap<String, Object>();
 
     /**
      * Local entries fetched from the configuration or from the registry for the transactional
@@ -698,6 +702,24 @@ public class Axis2MessageContext implements MessageContext {
     @Override
     public void setMessageFlowTracingState(int messageFlowTracingState) {
         this.messageFlowTracingState = messageFlowTracingState;
+    }
+
+    @Override
+    public Object getVariable(String key) {
+        return variables.get(key);
+    }
+
+    @Override
+    public void setVariable(String key, Object value) {
+        if (value == null) {
+            return;
+        }
+        variables.put(key, value);
+    }
+
+    @Override
+    public Set getVariableKeySet() {
+        return variables.keySet();
     }
 
     /**

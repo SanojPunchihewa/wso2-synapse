@@ -239,7 +239,7 @@ public class LogMediator extends AbstractMediator {
         }
     }
 
-    private Object getCorrelationId(MessageContext synCtx) {
+    protected Object getCorrelationId(MessageContext synCtx) {
         Object correlationId = null;
         if (synCtx instanceof Axis2MessageContext) {
             Axis2MessageContext axis2Ctx = ((Axis2MessageContext) synCtx);

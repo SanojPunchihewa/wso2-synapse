@@ -58,6 +58,7 @@ import org.apache.synapse.mediators.eip.SharedDataHolder;
 import org.apache.synapse.mediators.eip.EIPConstants;
 import org.apache.synapse.mediators.eip.EIPUtils;
 import org.apache.synapse.mediators.eip.Target;
+import org.apache.synapse.mediators.eip.aggregator.AggregateMediator;
 import org.apache.synapse.util.MessageHelper;
 import org.apache.synapse.util.xpath.SynapseJsonPath;
 import org.apache.synapse.util.xpath.SynapseXPath;
@@ -66,6 +67,7 @@ import org.jaxen.JaxenException;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Random;
 import java.util.Stack;
 
 /**
@@ -106,6 +108,14 @@ public class IterateMediator extends AbstractMediator implements ManagedLifecycl
      * A flag used to check whether attachPath was present in the original synapse configuration
      */
     private boolean isAttachPathPresent;
+    private final AggregateMediator aggregateMediator = new AggregateMediator();
+
+    public IterateMediator() {
+        // set id to a random UUID to be used for correlation
+        id = String.valueOf(new Random().nextLong());
+        aggregateMediator.setId(id);
+        aggregateMediator.setForEachLoop(true);
+    }
 
     /**
      * Splits the message by iterating over the results of the given Path expression
@@ -546,6 +556,7 @@ public class IterateMediator extends AbstractMediator implements ManagedLifecycl
 
     public void setTarget(Target target) {
         this.target = target;
+        this.target.getSequence().addChild(aggregateMediator);
     }
 
     public String getId() {
@@ -553,7 +564,7 @@ public class IterateMediator extends AbstractMediator implements ManagedLifecycl
     }
 
     public void setId(String id) {
-        this.id = id;
+//        this.id = id;
     }
 
     @Override

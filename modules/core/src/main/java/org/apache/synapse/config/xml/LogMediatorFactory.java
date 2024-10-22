@@ -23,6 +23,8 @@ import org.apache.axiom.om.OMAttribute;
 import org.apache.axiom.om.OMElement;
 import org.apache.synapse.Mediator;
 import org.apache.synapse.mediators.builtin.LogMediator;
+import org.apache.synapse.mediators.transform.pfutils.FreeMarkerTemplateProcessor;
+import org.apache.synapse.mediators.transform.pfutils.TemplateProcessor;
 
 import javax.xml.namespace.QName;
 import java.util.Properties;
@@ -53,66 +55,79 @@ public class LogMediatorFactory extends AbstractMediatorFactory  {
     private static final QName ATT_SEPERATOR = new QName("separator");
     private static final QName ATT_CATEGORY = new QName("category");
 
+    private static final QName ATT_MESSAGE = new QName("message");
+
     public QName getTagQName() {
         return LOG_Q;
     }
 
     public Mediator createSpecificMediator(OMElement elem, Properties properties) {
 
-        LogMediator logMediator = new LogMediator();
+        LogMediator logMediator;
 
-        // after successfully creating the mediator
-        // set its common attributes such as tracing etc
-        processAuditStatus(logMediator,elem);
-        
-        // Set the high level set of properties to be logged (i.e. log level)
-        OMAttribute level = elem.getAttribute(ATT_LEVEL);
-        if (level != null) {
-            String levelstr = level.getAttributeValue();
-            if (SIMPLE.equals(levelstr)) {
-                logMediator.setLogLevel(LogMediator.SIMPLE);
-            } else if (HEADERS.equals(levelstr)) {
-                logMediator.setLogLevel(LogMediator.HEADERS);
-            } else if (FULL.equals(levelstr)) {
-                logMediator.setLogLevel(LogMediator.FULL);
-            } else if (CUSTOM.equals(levelstr)) {
-                logMediator.setLogLevel(LogMediator.CUSTOM);
-            } else {
-                handleException("Invalid log level. Level has to be one of the following : "
-                        + "simple, headers, full, custom");
+        OMAttribute message = elem.getAttribute(ATT_MESSAGE);
+        if (message != null) {
+            logMediator = new org.apache.synapse.mediators.v2.LogMediator();
+            String messageFormat = message.getAttributeValue();
+            FreeMarkerTemplateProcessor templateProcessor = new FreeMarkerTemplateProcessor();
+            templateProcessor.setMediaType("json");
+            templateProcessor.setFormat(messageFormat);
+            templateProcessor.init();
+            ((org.apache.synapse.mediators.v2.LogMediator) logMediator).setTemplateProcessor(templateProcessor);
+        } else {
+            logMediator = new LogMediator();
+            // after successfully creating the mediator
+            // set its common attributes such as tracing etc
+            processAuditStatus(logMediator, elem);
+
+            // Set the high level set of properties to be logged (i.e. log level)
+            OMAttribute level = elem.getAttribute(ATT_LEVEL);
+            if (level != null) {
+                String levelstr = level.getAttributeValue();
+                if (SIMPLE.equals(levelstr)) {
+                    logMediator.setLogLevel(LogMediator.SIMPLE);
+                } else if (HEADERS.equals(levelstr)) {
+                    logMediator.setLogLevel(LogMediator.HEADERS);
+                } else if (FULL.equals(levelstr)) {
+                    logMediator.setLogLevel(LogMediator.FULL);
+                } else if (CUSTOM.equals(levelstr)) {
+                    logMediator.setLogLevel(LogMediator.CUSTOM);
+                } else {
+                    handleException("Invalid log level. Level has to be one of the following : "
+                            + "simple, headers, full, custom");
+                }
             }
-        }
 
-        // Set the log statement category (i.e. INFO, DEBUG, etc..)
-        OMAttribute category = elem.getAttribute(ATT_CATEGORY);
-        if (category != null) {
-            String catstr = category.getAttributeValue().trim().toUpperCase();
-            if (CAT_INFO.equals(catstr)) {
-                logMediator.setCategory(LogMediator.CATEGORY_INFO);
-            } else if (CAT_TRACE.equals(catstr)) {
-                logMediator.setCategory(LogMediator.CATEGORY_TRACE);
-            } else if (CAT_DEBUG.equals(catstr)) {
-                logMediator.setCategory(LogMediator.CATEGORY_DEBUG);
-            } else if (CAT_WARN.equals(catstr)) {
-                logMediator.setCategory(LogMediator.CATEGORY_WARN);
-            } else if (CAT_ERROR.equals(catstr)) {
-                logMediator.setCategory(LogMediator.CATEGORY_ERROR);
-            } else if (CAT_FATAL.equals(catstr)) {
-                logMediator.setCategory(LogMediator.CATEGORY_FATAL);
-            } else {
-                handleException("Invalid log category. Category has to be one of " +
-                        "the following : INFO, TRACE, DEBUG, WARN, ERROR, FATAL");
+            // Set the log statement category (i.e. INFO, DEBUG, etc..)
+            OMAttribute category = elem.getAttribute(ATT_CATEGORY);
+            if (category != null) {
+                String catstr = category.getAttributeValue().trim().toUpperCase();
+                if (CAT_INFO.equals(catstr)) {
+                    logMediator.setCategory(LogMediator.CATEGORY_INFO);
+                } else if (CAT_TRACE.equals(catstr)) {
+                    logMediator.setCategory(LogMediator.CATEGORY_TRACE);
+                } else if (CAT_DEBUG.equals(catstr)) {
+                    logMediator.setCategory(LogMediator.CATEGORY_DEBUG);
+                } else if (CAT_WARN.equals(catstr)) {
+                    logMediator.setCategory(LogMediator.CATEGORY_WARN);
+                } else if (CAT_ERROR.equals(catstr)) {
+                    logMediator.setCategory(LogMediator.CATEGORY_ERROR);
+                } else if (CAT_FATAL.equals(catstr)) {
+                    logMediator.setCategory(LogMediator.CATEGORY_FATAL);
+                } else {
+                    handleException("Invalid log category. Category has to be one of " +
+                            "the following : INFO, TRACE, DEBUG, WARN, ERROR, FATAL");
+                }
             }
+
+            // check if a custom separator has been supplied, if so use it
+            OMAttribute separator = elem.getAttribute(ATT_SEPERATOR);
+            if (separator != null) {
+                logMediator.setSeparator(separator.getAttributeValue());
+            }
+
+            logMediator.addAllProperties(MediatorPropertyFactory.getMediatorProperties(elem));
         }
-
-        // check if a custom separator has been supplied, if so use it
-        OMAttribute separator = elem.getAttribute(ATT_SEPERATOR);
-        if (separator != null) {
-            logMediator.setSeparator(separator.getAttributeValue());
-        }
-
-        logMediator.addAllProperties(MediatorPropertyFactory.getMediatorProperties(elem));
-
         addAllCommentChildrenToList(elem, logMediator.getCommentsList());
 
         return logMediator;

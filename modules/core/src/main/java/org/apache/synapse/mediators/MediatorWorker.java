@@ -25,7 +25,10 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.synapse.aspects.flow.statistics.StatisticsCloseEventListener;
 import org.apache.synapse.aspects.flow.statistics.collectors.RuntimeStatisticCollector;
 import org.apache.synapse.carbonext.TenantInfoConfigurator;
+import org.apache.synapse.continuation.ContinuationStackManager;
+import org.apache.synapse.continuation.SeqContinuationState;
 import org.apache.synapse.debug.SynapseDebugManager;
+import org.apache.synapse.mediators.base.SequenceMediator;
 import org.apache.synapse.util.logging.LoggingUtils;
 
 /**
@@ -87,7 +90,28 @@ public class MediatorWorker implements Runnable {
             }
 
             seq.mediate(synCtx);
-            //((Axis2MessageContext)synCtx).getAxis2MessageContext().getEnvelope().discard();
+////            ContinuationStackManager.updateSeqContinuationState(synCtx, seq.getMediatorPosition());
+////            //First push fault handlers for first continuation state.
+//            SeqContinuationState seqContinuationState = (SeqContinuationState) ContinuationStackManager.peakContinuationStateStack(synCtx);
+////            if (seqContinuationState != null) {
+//////                seq.mediate(synCtx, seqContinuationState);
+////            }
+//            boolean result = false;
+//            do {
+//                seqContinuationState = (SeqContinuationState) ContinuationStackManager.peakContinuationStateStack(synCtx);
+//                if (seqContinuationState != null) {
+//                    SequenceMediator sequenceMediator = ContinuationStackManager.retrieveSequence(synCtx, seqContinuationState);
+//                    //Report Statistics for this continuation call
+//                    result = sequenceMediator.mediate(synCtx, seqContinuationState);
+//                    if (RuntimeStatisticCollector.isStatisticsEnabled()) {
+//                        sequenceMediator.reportCloseStatistics(synCtx, null);
+//                    }
+//                } else {
+//                    break;
+//                }
+//                //for any result close the sequence as it will be handled by the callback method in statistics
+//            } while (result && !synCtx.getContinuationStateStack().isEmpty());
+////            //((Axis2MessageContext)synCtx).getAxis2MessageContext().getEnvelope().discard();
 
         } catch (SynapseException syne) {
             if (!synCtx.getFaultStack().isEmpty()) {

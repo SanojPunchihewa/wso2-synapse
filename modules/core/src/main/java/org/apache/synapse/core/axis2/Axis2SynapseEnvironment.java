@@ -264,7 +264,11 @@ public class Axis2SynapseEnvironment implements SynapseEnvironment {
         }
     }
 
-    public boolean injectMessage(final MessageContext synCtx) {
+    public boolean injectMessage(MessageContext synCtx) {
+        return injectMessage(synCtx, true);
+    }
+
+    public boolean injectMessage(final MessageContext synCtx, boolean isCall) {
         try {
 
             if (log.isDebugEnabled()) {
@@ -325,7 +329,7 @@ public class Axis2SynapseEnvironment implements SynapseEnvironment {
                     log.debug("Response received for the Continuation Call service invocation");
                 }
 
-                return mediateFromContinuationStateStack(synCtx);
+                return mediateFromContinuationStateStack(synCtx, isCall);
             }
 
             // if this is not a response to a proxy service
@@ -789,7 +793,7 @@ public class Axis2SynapseEnvironment implements SynapseEnvironment {
      * @param synCtx MessageContext
      * @return whether mediation is completed
      */
-    private boolean mediateFromContinuationStateStack(MessageContext synCtx) {
+    public boolean mediateFromContinuationStateStack(MessageContext synCtx, boolean isCall) {
 
         if (log.isDebugEnabled()) {
             log.debug("Mediating response using the ContinuationStateStack");
@@ -819,7 +823,9 @@ public class Axis2SynapseEnvironment implements SynapseEnvironment {
         if (seqContinuationState == null) {
             return false;
         }
-        callMediatorPostMediate(synCtx);
+        if (isCall) {
+            callMediatorPostMediate(synCtx);
+        }
         boolean result = false;
         do {
             seqContinuationState = (SeqContinuationState) ContinuationStackManager.peakContinuationStateStack(synCtx);
