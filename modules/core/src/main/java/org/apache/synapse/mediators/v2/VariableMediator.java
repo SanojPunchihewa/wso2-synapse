@@ -29,39 +29,25 @@ import org.apache.synapse.SynapseLog;
 import org.apache.synapse.aspects.ComponentType;
 import org.apache.synapse.aspects.flow.statistics.collectors.CloseEventCollector;
 import org.apache.synapse.config.SynapseConfigUtils;
+import org.apache.synapse.config.xml.SynapsePath;
 import org.apache.synapse.config.xml.XMLConfigConstants;
 import org.apache.synapse.mediators.AbstractMediator;
 
 import java.util.Set;
 
+/**
+ * The variable mediator save or remove a named variable in the Synapse Message Context.
+ */
 public class VariableMediator extends AbstractMediator {
 
     public static final int ACTION_SET = 0;
     public static final int ACTION_REMOVE = 1;
-    /**
-     * The Name of the variable
-     */
     private String name = null;
-    /**
-     * The Value to be set
-     */
-    private Expression value = null;
-    /**
-     * The data type of the value
-     */
+    private SynapsePath expression = null;
+    private Object value = null;
     private String type = null;
-    /**
-     * Set the property (ACTION_SET) or remove it (ACTION_REMOVE). Defaults to ACTION_SET
-     */
     private int action = ACTION_SET;
 
-    /**
-     * Sets a property into the current (local) Synapse Context or into the Axis Message Context
-     * or into Transports Header and removes above properties from the corresponding locations.
-     *
-     * @param synCtx the message context
-     * @return true always
-     */
     public boolean mediate(MessageContext synCtx) {
 
         if (synCtx.getEnvironment().isDebuggerEnabled()) {
@@ -81,14 +67,6 @@ public class VariableMediator extends AbstractMediator {
         }
 
         String name = this.name;
-//        //checks the name attribute value is a dynamic or not
-//        if (dynamicNameValue != null) {
-//            name = dynamicNameValue.evaluateValue(synCtx);
-//            if (StringUtils.isEmpty(name)) {
-//                log.warn("Evaluated value for " + this.name + " is empty");
-//            }
-//        }
-
         if (action == ACTION_SET) {
 
             Object resultValue = getResultValue(synCtx);
@@ -107,7 +85,6 @@ public class VariableMediator extends AbstractMediator {
             if (synLog.isTraceOrDebugEnabled()) {
                 synLog.traceOrDebug("Removing variable : " + name);
             }
-            //Removing property from the  Synapse Context
             Set variableKeySet = synCtx.getVariableKeySet();
             if (variableKeySet != null) {
                 variableKeySet.remove(name);
@@ -139,7 +116,7 @@ public class VariableMediator extends AbstractMediator {
     }
 
     /**
-     * Set the value to be set by this property mediator and the data type
+     * Set the value to be set by this variable mediator and the data type
      * to be used when setting the value. Accepted type names are defined in
      * XMLConfigConstants.DATA_TYPES enumeration. Passing null as the type
      * implies that 'STRING' type should be used.
@@ -150,7 +127,7 @@ public class VariableMediator extends AbstractMediator {
     public void setValue(String value, String type) {
 
         this.type = type;
-        this.value = new Expression(value);
+        this.value = convertValue(value, type, false);
     }
 
     public String getType() {
@@ -175,10 +152,25 @@ public class VariableMediator extends AbstractMediator {
         this.action = action;
     }
 
+    public SynapsePath getExpression() {
+
+        return expression;
+    }
+
+    public void setExpression(SynapsePath expression, String type) {
+
+        this.expression = expression;
+        this.type = type;
+    }
+
     private Object getResultValue(MessageContext synCtx) {
 
         if (value != null) {
-            return value.resolve(synCtx);
+            return value;
+        } else {
+            if (expression != null) {
+                return convertValue(expression.stringValueOf(synCtx), type, true);
+            }
         }
 
         return null;
@@ -187,7 +179,6 @@ public class VariableMediator extends AbstractMediator {
     private Object convertValue(String value, String type, boolean isExpression) {
 
         if (type == null) {
-            // If no type is set we simply return the string value
             return value;
         }
 
@@ -214,8 +205,8 @@ public class VariableMediator extends AbstractMediator {
                     return value;
             }
         } catch (IllegalArgumentException e) {
-            String msg = "Unknown type : " + type + " for the property mediator or the " +
-                    "property value cannot be converted into the specified type.";
+            String msg = "Unknown type : " + type + " for the variable mediator or the " +
+                    "variable value cannot be converted into the specified type.";
             log.error(msg, e);
             throw new SynapseException(msg, e);
         }
@@ -255,18 +246,14 @@ public class VariableMediator extends AbstractMediator {
     public boolean isContentAware() {
 
         boolean contentAware = false;
-        if (value != null) {
-            contentAware = value.isContentAware();
+        if (expression != null) {
+            contentAware = expression.isContentAware();
         }
-
-//        if (dynamicNameValue != null && dynamicNameValue.getExpression() != null) {
-//            contentAware = contentAware || dynamicNameValue.getExpression().isContentAware();
-//        }
         return contentAware;
     }
 
     private OMElement buildOMElement(String xml) {
-        // intentionally building the resulting OMElement. See ESBJAVA-3478.
+
         if (xml == null) {
             return null;
         }
@@ -298,24 +285,5 @@ public class VariableMediator extends AbstractMediator {
     public String getMediatorName() {
 
         return super.getMediatorName() + ":" + name;
-    }
-
-    static class Expression {
-        String expression;
-        String type;
-
-        public Expression(String expression) {
-            this.expression = expression;
-        }
-
-        public Object resolve(MessageContext messageContext) {
-            // TODO
-            return expression;
-        }
-
-        public boolean isContentAware(){
-            // TODO
-            return true;
-        }
     }
 }

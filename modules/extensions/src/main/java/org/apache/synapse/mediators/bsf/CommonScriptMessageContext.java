@@ -1084,6 +1084,36 @@ public class CommonScriptMessageContext implements ScriptMessageContext {
         mc.setMessageFlowTracingState(state);
     }
 
+    @Override
+    public Object getVariable(String key) {
+
+        return mc.getVariable(key);
+    }
+
+    @Override
+    public void setVariable(String key, Object value) {
+
+        if (value instanceof XMLObject) {
+            OMElement omElement = null;
+            try {
+                omElement = xmlHelper.toOMElement(value);
+            } catch (ScriptException e) {
+                mc.setVariable(key, value);
+            }
+            if (omElement != null) {
+                mc.setVariable(key, omElement);
+            }
+        } else {
+            mc.setVariable(key, value);
+        }
+    }
+
+    @Override
+    public Set getVariableKeySet() {
+
+        return mc.getVariableKeySet();
+    }
+
     /**
      * {@inheritDoc}
      */

@@ -116,13 +116,13 @@ public class ScatterGatherMediatorFactory extends AbstractMediatorFactory {
         	asynchronousExe = false;
         }
 
-//        mediator.setSequential(!asynchronousExe);
+        mediator.setSequential(!asynchronousExe);
         
         Iterator targetElements = elem.getChildrenWithName(TARGET_Q);
         int noOfTargets = 0;
         while (targetElements.hasNext()) {
         	Target target = TargetFactory.createTarget((OMElement)targetElements.next(), properties);
-        	target.setAsynchronous(true);
+        	target.setAsynchronous(asynchronousExe);
             mediator.addTarget(target);
             noOfTargets++;
         }
