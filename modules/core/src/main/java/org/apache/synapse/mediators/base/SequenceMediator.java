@@ -42,6 +42,7 @@ import org.apache.synapse.mediators.FlowContinuableMediator;
 import org.apache.synapse.mediators.MediatorFaultHandler;
 import org.apache.synapse.mediators.Value;
 
+import java.util.Set;
 import java.util.Stack;
 
 /**
@@ -157,7 +158,16 @@ public class SequenceMediator extends AbstractListMediator implements Nameable,
 
                 boolean result = super.mediate(synCtx);
 
-                if (result && !skipAddition) {
+                Boolean scatter = (Boolean) synCtx.getProperty("scatter");
+
+                if (scatter != null && scatter) {
+                    Set keySet = synCtx.getPropertyKeySet();
+                    if (keySet != null) {
+                        keySet.remove("scatter");
+                    }
+                }
+
+                if (result && !skipAddition && Boolean.FALSE.equals(scatter)) { //  && Boolean.FALSE.equals(scatter)
                     // if flow completed remove the previously added SeqContinuationState
                     ContinuationStackManager.removeSeqContinuationState(synCtx, sequenceType);
                 }

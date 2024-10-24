@@ -31,6 +31,8 @@ import org.apache.synapse.debug.SynapseDebugManager;
 import org.apache.synapse.mediators.base.SequenceMediator;
 import org.apache.synapse.util.logging.LoggingUtils;
 
+import static org.apache.synapse.continuation.ContinuationStackManager.SKIP_CONTINUATION_STATE;
+
 /**
  * This class will be used as the executer for the injectAsync method for the
  * sequence mediation
@@ -88,6 +90,8 @@ public class MediatorWorker implements Runnable {
                 debugManager.acquireMediationFlowLock();
                 debugManager.advertiseMediationFlowStartPoint(synCtx);
             }
+
+            synCtx.setProperty("scatter", true);
 
             boolean result = seq.mediate(synCtx);
 

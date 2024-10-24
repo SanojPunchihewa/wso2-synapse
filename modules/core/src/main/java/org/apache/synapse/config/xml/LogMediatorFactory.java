@@ -66,15 +66,15 @@ public class LogMediatorFactory extends AbstractMediatorFactory  {
         LogMediator logMediator;
 
         OMAttribute message = elem.getAttribute(ATT_MESSAGE);
-        if (message != null) {
-            logMediator = new org.apache.synapse.mediators.v2.LogMediator();
-            String messageFormat = message.getAttributeValue();
-            FreeMarkerTemplateProcessor templateProcessor = new FreeMarkerTemplateProcessor();
-            templateProcessor.setMediaType("json");
-            templateProcessor.setFormat(messageFormat);
-            templateProcessor.init();
-            ((org.apache.synapse.mediators.v2.LogMediator) logMediator).setTemplateProcessor(templateProcessor);
-        } else {
+//        if (message != null) {
+//            logMediator = new org.apache.synapse.mediators.v2.LogMediator();
+//            String messageFormat = message.getAttributeValue();
+//            FreeMarkerTemplateProcessor templateProcessor = new FreeMarkerTemplateProcessor();
+//            templateProcessor.setMediaType("json");
+//            templateProcessor.setFormat(messageFormat);
+//            templateProcessor.init();
+//            ((org.apache.synapse.mediators.v2.LogMediator) logMediator).setTemplateProcessor(templateProcessor);
+//        } else {
             logMediator = new LogMediator();
             // after successfully creating the mediator
             // set its common attributes such as tracing etc
@@ -127,7 +127,7 @@ public class LogMediatorFactory extends AbstractMediatorFactory  {
             }
 
             logMediator.addAllProperties(MediatorPropertyFactory.getMediatorProperties(elem));
-        }
+//        }
         addAllCommentChildrenToList(elem, logMediator.getCommentsList());
 
         return logMediator;

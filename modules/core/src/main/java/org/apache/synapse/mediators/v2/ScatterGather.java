@@ -9,7 +9,6 @@ import org.apache.axis2.Constants;
 import org.apache.axis2.context.OperationContext;
 import org.apache.synapse.ContinuationState;
 import org.apache.synapse.ManagedLifecycle;
-import org.apache.synapse.Mediator;
 import org.apache.synapse.MessageContext;
 import org.apache.synapse.SynapseException;
 import org.apache.synapse.SynapseLog;
@@ -18,7 +17,6 @@ import org.apache.synapse.aspects.flow.statistics.util.StatisticDataCollectionHe
 import org.apache.synapse.commons.json.JsonUtil;
 import org.apache.synapse.config.xml.SynapsePath;
 import org.apache.synapse.continuation.ContinuationStackManager;
-import org.apache.synapse.continuation.ReliantContinuationState;
 import org.apache.synapse.continuation.SeqContinuationState;
 import org.apache.synapse.core.SynapseEnvironment;
 import org.apache.synapse.core.axis2.Axis2MessageContext;
@@ -68,7 +66,7 @@ public class ScatterGather extends AbstractMediator implements ManagedLifecycle,
      * The minimum number of messages required to complete aggregation
      */
     private Value maxMessagesToComplete;
-    private boolean isAggregateComplete = false;
+    private boolean isScatterDone = false;
 
     private SynapsePath correlateExpression = null;
     private boolean sequential = true;
@@ -103,6 +101,10 @@ public class ScatterGather extends AbstractMediator implements ManagedLifecycle,
 
         SynapseLog synLog = getLog(synCtx);
 
+//        if (!sequential && isScatterDone) {
+//            return aggregateMessages(synCtx, synLog);ƒ
+//        }
+
         if (synLog.isTraceOrDebugEnabled()) {
             synLog.traceOrDebug("Start : Clone mediator");
 
@@ -124,8 +126,7 @@ public class ScatterGather extends AbstractMediator implements ManagedLifecycle,
 //            }
 
             MessageContext clonedMsgCtx = getClonedMessageContext(synCtx, i++, targets.size());
-            ContinuationStackManager.addReliantContinuationState(clonedMsgCtx, i - 1,
-                    getMediatorPosition());
+            ContinuationStackManager.addReliantContinuationState(clonedMsgCtx, i - 1, getMediatorPosition());
             boolean result = iter.next().mediate(clonedMsgCtx);
             if (sequential && result) {
                 aggregationResult = aggregateMessages(clonedMsgCtx, synLog);
@@ -137,6 +138,7 @@ public class ScatterGather extends AbstractMediator implements ManagedLifecycle,
 //                break;
 //            }
         }
+//        isScatterDone = true;
         // if the continuation of the parent message is stopped from here set the RESPONSE_WRITTEN
         // property to SKIP to skip the blank http response
         OperationContext opCtx
@@ -245,27 +247,38 @@ public class ScatterGather extends AbstractMediator implements ManagedLifecycle,
             synLog.traceOrDebug("Clone mediator : Mediating from ContinuationState");
         }
 
-        boolean result;
-        int subBranch = ((ReliantContinuationState) continuationState).getSubBranch();
+//        boolean result;
+//        int subBranch = ((ReliantContinuationState) continuationState).getSubBranch();
+//
+//        SequenceMediator branchSequence = targets.get(subBranch).getSequence();
+//        boolean isStatisticsEnabled = RuntimeStatisticCollector.isStatisticsEnabled();
+//        if (!continuationState.hasChild()) {
+//            result = branchSequence.mediate(synCtx, continuationState.getPosition() + 1);
+//        } else {
+//            FlowContinuableMediator mediator =
+//                    (FlowContinuableMediator) branchSequence.getChild(continuationState.getPosition());
+//
+//            result = mediator.mediate(synCtx, continuationState.getChildContState());
+//
+//            if (isStatisticsEnabled) {
+//                ((Mediator) mediator).reportCloseStatistics(synCtx, null);
+//            }
+//            if (result) {
+//                // if flow completed remove leaf child
+//                continuationState.removeLeafChild();
+//            }
+//        }
+//        if (isStatisticsEnabled) {
+//            branchSequence.reportCloseStatistics(synCtx, null);
+//        }
+////        return aggregateMediator.mediate(synCtx);
+////        if (result) {
+////            // if flow completed remove the previously added SeqContinuationState
+////            ContinuationStackManager.removeSeqContinuationState(synCtx, SequenceType.NAMED);
+////        }
+//        ContinuationStackManager.removeSeqContinuationState(synCtx, SequenceType.NAMED);
 
-        SequenceMediator branchSequence = targets.get(subBranch).getSequence();
-        boolean isStatisticsEnabled = RuntimeStatisticCollector.isStatisticsEnabled();
-        if (!continuationState.hasChild()) {
-            result = branchSequence.mediate(synCtx, continuationState.getPosition() + 1);
-        } else {
-            FlowContinuableMediator mediator =
-                    (FlowContinuableMediator) branchSequence.getChild(continuationState.getPosition());
-
-            result = mediator.mediate(synCtx, continuationState.getChildContState());
-
-            if (isStatisticsEnabled) {
-                ((Mediator) mediator).reportCloseStatistics(synCtx, null);
-            }
-        }
-        if (isStatisticsEnabled) {
-            branchSequence.reportCloseStatistics(synCtx, null);
-        }
-//        return aggregateMediator.mediate(synCtx);
+        continuationState.removeLeafChild();
         return aggregateMessages(synCtx, synLog);
     }
 
@@ -365,7 +378,7 @@ public class ScatterGather extends AbstractMediator implements ManagedLifecycle,
                 synLog.traceOrDebug("Aggregation completed - invoking onComplete");
                 boolean onCompleteSeqResult = completeAggregate(aggregate);
                 synLog.traceOrDebug("End : Aggregate mediator");
-                isAggregateComplete = onCompleteSeqResult;
+//                isAggregateComplete = onCompleteSeqResult;
                 return onCompleteSeqResult;
             } else {
                 aggregate.releaseLock();
@@ -474,6 +487,7 @@ public class ScatterGather extends AbstractMediator implements ManagedLifecycle,
 //            return true;
 //        }
 //        return false;
+        ContinuationStackManager.updateSeqContinuationState(newSynCtx, getMediatorPosition());
         SeqContinuationState seqContinuationState = (SeqContinuationState) ContinuationStackManager.peakContinuationStateStack(newSynCtx);
         if (seqContinuationState == null) {
             return false;
