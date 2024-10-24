@@ -33,6 +33,7 @@ import org.apache.synapse.SynapseException;
 import org.apache.synapse.aspects.AspectConfigurable;
 import org.apache.synapse.aspects.statistics.StatisticsConfigurable;
 import org.apache.synapse.mediators.MediatorProperty;
+import org.apache.synapse.mediators.MediatorVariable;
 import org.apache.synapse.mediators.builtin.CommentMediator;
 
 import javax.xml.namespace.QName;
@@ -53,6 +54,8 @@ public abstract class AbstractMediatorSerializer implements MediatorSerializer {
             = fac.createOMNamespace(XMLConfigConstants.NULL_NAMESPACE, "");
     protected static final QName PROP_Q
         = new QName(XMLConfigConstants.SYNAPSE_NAMESPACE, "property");
+    protected static final QName VARIABLE_Q
+            = new QName(XMLConfigConstants.SYNAPSE_NAMESPACE, "variable");
     protected static final QName DESCRIPTION_Q
         = new QName(XMLConfigConstants.SYNAPSE_NAMESPACE, "description");
     /**
@@ -198,6 +201,31 @@ public abstract class AbstractMediatorSerializer implements MediatorSerializer {
 
     protected void serializeProperties(OMElement parent, Collection<MediatorProperty> props) {
         serializeMediatorProperties(parent, props);
+    }
+
+    protected void serializeVariables(OMElement parent, Collection<MediatorVariable> variables) {
+
+        serializeMediatorVariables(parent, variables, VARIABLE_Q);
+    }
+
+    protected void serializeMediatorVariables(OMElement parent, Collection<MediatorVariable> variables,
+                                               QName childElementName) {
+
+        for (MediatorVariable variable : variables) {
+            OMElement variableElement = fac.createOMElement(childElementName, parent);
+            if (variable.getName() != null) {
+                variableElement.addAttribute(fac.createOMAttribute("name", nullNS, variable.getName()));
+            } else {
+                handleException("Mediator variable name is missing");
+            }
+            if (variable.getValue() != null) {
+                variableElement.addAttribute(fac.createOMAttribute("value", nullNS, variable.getValue()));
+            } else if (variable.getExpression() != null) {
+                SynapsePathSerializer.serializePath(variable.getExpression(), variableElement, "expression");
+            } else {
+                handleException("Mediator variable must have a 'value' or an 'expression'");
+            }
+        }
     }
 
     protected void serializeNamespaces(OMElement elem, AXIOMXPath xpath) {

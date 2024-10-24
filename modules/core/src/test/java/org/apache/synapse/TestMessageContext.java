@@ -42,6 +42,7 @@ import java.util.Stack;
 public class TestMessageContext implements MessageContext {
 
     private Map properties = new HashMap();
+    private Map variables = new HashMap();
 
     private Map<String, Object> localEntries = new HashMap<String, Object>();
 
@@ -381,6 +382,24 @@ public class TestMessageContext implements MessageContext {
     }
 
     public void setMessageFlowTracingState(int tracingState){
+    }
+
+    @Override
+    public Object getVariable(String key) {
+
+        return variables.get(key);
+    }
+
+    @Override
+    public void setVariable(String key, Object value) {
+
+        variables.put(key, value);
+    }
+
+    @Override
+    public Set getVariableKeySet() {
+
+        return variables.keySet();
     }
 
     public int getMessageFlowTracingState(){

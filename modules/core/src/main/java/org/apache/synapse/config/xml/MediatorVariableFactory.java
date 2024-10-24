@@ -35,7 +35,7 @@ import java.util.List;
 
 /**
  * A utility class capable of creating instances of MediatorVariable objects by reading
- * through a given XML configuration
+ * through a given XML configuration.
  *
  * <pre>
  * &lt;element&gt;
