@@ -35,7 +35,7 @@ import java.util.regex.Pattern;
 public class RegexTemplateProcessor extends TemplateProcessor {
 
     private static final Log log = LogFactory.getLog(RegexTemplateProcessor.class);
-    private final Pattern pattern = Pattern.compile("\\$(\\d)+");
+    private final Pattern pattern = Pattern.compile("\\$(\\d+)|#\\[(.+?)]");
 
     @Override
     public String processTemplate(String template, String mediaType, MessageContext synCtx) {
@@ -72,16 +72,33 @@ public class RegexTemplateProcessor extends TemplateProcessor {
         }
         try {
             while (matcher.find()) {
-                String matchSeq = matcher.group();
-                replacement = getReplacementValue(argValues, matchSeq);
-                replacementEntry = replacement.entrySet().iterator().next();
-                replacementValue = prepareReplacementValue(mediaType, synCtx, replacementEntry);
+                if (matcher.group(1) != null) {
+                    String matchSeq = matcher.group(1);
+                    replacement = getReplacementValue(argValues, matchSeq);
+                    replacementEntry = replacement.entrySet().iterator().next();
+                    replacementValue = prepareReplacementValue(mediaType, synCtx, replacementEntry);
+                } else {
+                    String expression = matcher.group(2);
+                    replacementValue = ExpressionResolver.resolve(expression, synCtx);
+                }
                 matcher.appendReplacement(result, replacementValue);
             }
         } catch (ArrayIndexOutOfBoundsException e) {
             log.error("#replace. Mis-match detected between number of formatters and arguments", e);
         }
         matcher.appendTail(result);
+    }
+
+    // Dummy resolver for expressions to test the processor for Log mediator
+    // TODO replace this with actual expression resolver
+    static class ExpressionResolver {
+        public static String resolve(String expression, MessageContext synCtx) {
+            String variableName = expression.substring(4);
+            if (synCtx.getVariable(variableName) != null) {
+                return synCtx.getVariable(variableName).toString();
+            }
+            return expression;
+        }
     }
 
     private HashMap<String, ArgumentDetails> getReplacementValue(HashMap<String, ArgumentDetails>[] argValues,

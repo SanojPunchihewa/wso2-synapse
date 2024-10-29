@@ -158,16 +158,7 @@ public class SequenceMediator extends AbstractListMediator implements Nameable,
 
                 boolean result = super.mediate(synCtx);
 
-                Boolean scatter = (Boolean) synCtx.getProperty("scatter");
-
-                if (scatter != null && scatter) {
-                    Set keySet = synCtx.getPropertyKeySet();
-                    if (keySet != null) {
-                        keySet.remove("scatter");
-                    }
-                }
-
-                if (result && !skipAddition && Boolean.FALSE.equals(scatter)) { //  && Boolean.FALSE.equals(scatter)
+                if (result && !skipAddition) { //  && Boolean.FALSE.equals(scatter)
                     // if flow completed remove the previously added SeqContinuationState
                     ContinuationStackManager.removeSeqContinuationState(synCtx, sequenceType);
                 }

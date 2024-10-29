@@ -63,16 +63,14 @@ public class ScatterGatherMediatorFactory extends AbstractMediatorFactory {
             = new QName(XMLConfigConstants.SYNAPSE_NAMESPACE, "scatter-gather");
     private static final QName ATT_VALUE_TO_AGGREGATE = new QName("value-to-aggregate");
     private static final QName ATT_CONDITION = new QName("condition");
+    private static final QName ATT_TIMEOUT = new QName("timeout");
+    private static final QName ATT_MIN_MESSAGES = new QName("min-messages");
+    private static final QName ATT_MAX_MESSAGES = new QName("max-messages");
+    private static final QName ATT_TARGET_VARIABLE = new QName("target-variable");
+
     private static final QName TARGET_Q
             = new QName(XMLConfigConstants.SYNAPSE_NAMESPACE, "target");
-
-    private static final QName AGGREGATE_Q
-            = new QName(XMLConfigConstants.SYNAPSE_NAMESPACE, "aggregate");
-
-    private static final QName ID_Q
-            = new QName(XMLConfigConstants.NULL_NAMESPACE, "id");
     private static final QName SEQUENTIAL_Q = new QName("sequential");
-    private static final String ITERATIONS = "iterations";
 
     /**
      * This method implements the createMediator method of the MediatorFactory interface
@@ -87,29 +85,7 @@ public class ScatterGatherMediatorFactory extends AbstractMediatorFactory {
     	boolean asynchronousExe = true;
         
     	ScatterGather mediator = new ScatterGather();
-//        processAuditStatus(mediator, elem);
-
-//        OMAttribute id = elem.getAttribute(ID_Q);
-//        if (id != null) {
-//            mediator.setId(id.getAttributeValue());
-//        }
-//
-//
-//        OMAttribute continueParent = elem.getAttribute(ATT_CONTINUE_PARENT);
-//        if (continueParent != null) {
-//            mediator.setContinueParent(JavaUtils.isTrueExplicitly(
-//                    continueParent.getAttributeValue()));
-//        }
-//
-//        OMAttribute iterations = elem.getAttribute(ATT_ITERATIONS);
-//        if (iterations != null) {
-//            String iterationsAttributeStr = iterations.getAttributeValue();
-//            if (isDynamicValue(iterationsAttributeStr)) {
-//                Value iterationsAttributeValue = resolveDynamicAttribute(iterationsAttributeStr, elem);
-//                mediator.setDynamicIterationsValue(iterationsAttributeValue);
-//            }
-//            mediator.setIterations(iterationsAttributeStr);
-//        }
+        processAuditStatus(mediator, elem);
 
         OMAttribute synchronousExeAttr= elem.getAttribute(SEQUENTIAL_Q);
         if (synchronousExeAttr != null && synchronousExeAttr.getAttributeValue().equals("true")) {
@@ -119,20 +95,14 @@ public class ScatterGatherMediatorFactory extends AbstractMediatorFactory {
         mediator.setSequential(!asynchronousExe);
         
         Iterator targetElements = elem.getChildrenWithName(TARGET_Q);
-        int noOfTargets = 0;
         while (targetElements.hasNext()) {
         	Target target = TargetFactory.createTarget((OMElement)targetElements.next(), properties);
         	target.setAsynchronous(asynchronousExe);
             mediator.addTarget(target);
-            noOfTargets++;
         }
 
         OMElement aggregateElement = elem.getFirstChildWithName(
                 new QName(SynapseConstants.SYNAPSE_NAMESPACE, "aggregate"));
-//
-//        String condition = aggregateElement.getAttribute(ATT_CONDITION).getAttributeValue();
-//        String valueToAggregate = aggregateElement.getAttribute(ATT_VALUE_TO_AGGREGATE).getAttributeValue();
-//        mediator.setAggregationExpression(valueToAggregate);
 
         OMAttribute aggregateExpr = aggregateElement.getAttribute(ATT_VALUE_TO_AGGREGATE);
         if (aggregateExpr != null) {
@@ -144,60 +114,38 @@ public class ScatterGatherMediatorFactory extends AbstractMediatorFactory {
             }
         }
 
-//        mediator.set
+        OMAttribute conditionExpr = aggregateElement.getAttribute(ATT_CONDITION);
+        if (conditionExpr != null) {
+            try {
+                mediator.setCorrelateExpression(
+                        SynapsePathFactory.getSynapsePath(aggregateElement, ATT_CONDITION));
+            } catch (JaxenException e) {
+                handleException("Unable to load the aggregating XPATH", e);
+            }
+        }
 
-//        if (iterations != null && noOfTargets > 1) {
-//            handleException("When iterations attribute is defined only one target is allowed.");
-//        }
+        OMAttribute completeTimeout = aggregateElement.getAttribute(ATT_TIMEOUT);
+        if (completeTimeout != null) {
+            mediator.setCompletionTimeoutMillis(Long.parseLong(completeTimeout.getAttributeValue()) * 1000);
+        }
+
+        OMAttribute targetVariable = aggregateElement.getAttribute(ATT_TARGET_VARIABLE);
+        if (completeTimeout != null) {
+            mediator.setTargetVariable(targetVariable.getAttributeValue());
+        }
+
+        OMAttribute minMessages = aggregateElement.getAttribute(ATT_MIN_MESSAGES);
+        if (minMessages != null) {
+            mediator.setMinMessagesToComplete(new ValueFactory().createValue("min-messages", aggregateElement));
+        }
+
+        OMAttribute maxMessages = aggregateElement.getAttribute(ATT_MAX_MESSAGES);
+        if (maxMessages != null) {
+            mediator.setMaxMessagesToComplete(new ValueFactory().createValue("max-messages", aggregateElement));
+        }
 
         addAllCommentChildrenToList(elem, mediator.getCommentsList());
-
         return mediator;
-    }
-
-    /**
-     * This is a utility method to resolve dynamic attribute
-     * @param attributeValue the attribute value
-     * @param elem the OMElement
-     * @return QName of the clone element in xml configuration
-     */
-    private Value resolveDynamicAttribute(String attributeValue, OMElement elem) {
-        try {
-            String valueExpression = attributeValue.substring(1, attributeValue.length() - 1);
-            if (valueExpression.startsWith("json-eval(")) {
-                new SynapseJsonPath(valueExpression.substring(10, valueExpression.length() - 1));
-            } else {
-                new SynapseXPath(valueExpression);
-            }
-        } catch (JaxenException e) {
-            handleException("Invalid expression for attribute 'name' : " + attributeValue);
-        }
-        // ValueFactory for creating dynamic Value
-        ValueFactory nameValueFactory = new ValueFactory();
-        // create dynamic Value based on OMElement
-        return nameValueFactory.createValue(ITERATIONS, elem);
-    }
-
-    /**
-     * Validate the given value to identify whether it is static or dynamic key
-     * If the value is in the {} format then it is dynamic key(XPath)
-     * Otherwise just a static value
-     *
-     * @param nameValue string to validate as a name
-     * @return isDynamicValue representing name type
-     */
-    private boolean isDynamicValue(String nameValue) {
-        if (nameValue.length() < 2) {
-            return false;
-        }
-
-        final char startExpression = '{';
-        final char endExpression = '}';
-
-        char firstChar = nameValue.charAt(0);
-        char lastChar = nameValue.charAt(nameValue.length() - 1);
-
-        return (startExpression == firstChar && endExpression == lastChar);
     }
 
     /**

@@ -58,7 +58,7 @@ public class LoggerMediator extends AbstractMediator {
         SynapseLog synLog = getLog(synCtx);
 
         if (synLog.isTraceOrDebugEnabled()) {
-            synLog.traceOrDebug("Start : Log mediator");
+            synLog.traceOrDebug("Start : Logger mediator");
 
             if (synLog.isTraceTraceEnabled()) {
                 synLog.traceTrace("Message : " + synCtx.getEnvelope());
@@ -89,7 +89,7 @@ public class LoggerMediator extends AbstractMediator {
                 synLog.auditFatal(generateLogMessage(synCtx));
                 break;
         }
-        synLog.traceOrDebug("End : Log mediator");
+        synLog.traceOrDebug("End : Logger mediator");
         return true;
     }
 

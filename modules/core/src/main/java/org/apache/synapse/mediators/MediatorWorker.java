@@ -31,7 +31,6 @@ import org.apache.synapse.debug.SynapseDebugManager;
 import org.apache.synapse.mediators.base.SequenceMediator;
 import org.apache.synapse.util.logging.LoggingUtils;
 
-import static org.apache.synapse.continuation.ContinuationStackManager.SKIP_CONTINUATION_STATE;
 
 /**
  * This class will be used as the executer for the injectAsync method for the
@@ -91,55 +90,30 @@ public class MediatorWorker implements Runnable {
                 debugManager.advertiseMediationFlowStartPoint(synCtx);
             }
 
-            synCtx.setProperty("scatter", true);
-
-            boolean result = seq.mediate(synCtx);
-
-            if (result) {
-                //First push fault handlers for first continuation state.
+            if (isInvokedFromScatterGather(synCtx)) {
                 SeqContinuationState seqContinuationState = (SeqContinuationState) ContinuationStackManager.peakContinuationStateStack(synCtx);
-                if (seqContinuationState == null) {
-                    return;
+                SeqContinuationState seqContinuationStateCloned = null;
+                if (seqContinuationState != null) {
+                    seqContinuationStateCloned = ContinuationStackManager.getClonedSeqContinuationState(seqContinuationState);
                 }
-                do {
-                    seqContinuationState = (SeqContinuationState) ContinuationStackManager.peakContinuationStateStack(synCtx);
-                    if (seqContinuationState != null) {
-                        SequenceMediator sequenceMediator = ContinuationStackManager.retrieveSequence(synCtx, seqContinuationState);
+
+                boolean result = seq.mediate(synCtx);
+
+                if (result) {
+                    if (seqContinuationStateCloned != null) {
+                        synCtx.pushContinuationState(seqContinuationStateCloned);
+                        SequenceMediator sequenceMediator = ContinuationStackManager.retrieveSequence(synCtx, seqContinuationStateCloned);
                         //Report Statistics for this continuation call
-                        result = sequenceMediator.mediate(synCtx, seqContinuationState);
+                        synCtx.setProperty("from.worker", true);
+                        sequenceMediator.mediate(synCtx, seqContinuationStateCloned);
                         if (RuntimeStatisticCollector.isStatisticsEnabled()) {
                             sequenceMediator.reportCloseStatistics(synCtx, null);
                         }
-                    } else {
-                        break;
                     }
-                    //for any result close the sequence as it will be handled by the callback method in statistics
-                } while (result && !synCtx.getContinuationStateStack().isEmpty());
-//                return result;
+                }
+            } else {
+                seq.mediate(synCtx);
             }
-//            ContinuationStackManager.updateSeqContinuationState(synCtx, seq.getMediatorPosition());
-////            //First push fault handlers for first continuation state.
-//            SeqContinuationState seqContinuationState = (SeqContinuationState) ContinuationStackManager.peakContinuationStateStack(synCtx);
-////            if (seqContinuationState != null) {
-//////                seq.mediate(synCtx, seqContinuationState);
-////            }
-//            boolean result = false;
-//            do {
-//                seqContinuationState = (SeqContinuationState) ContinuationStackManager.peakContinuationStateStack(synCtx);
-//                if (seqContinuationState != null) {
-//                    SequenceMediator sequenceMediator = ContinuationStackManager.retrieveSequence(synCtx, seqContinuationState);
-//                    //Report Statistics for this continuation call
-//                    result = sequenceMediator.mediate(synCtx, seqContinuationState);
-//                    if (RuntimeStatisticCollector.isStatisticsEnabled()) {
-//                        sequenceMediator.reportCloseStatistics(synCtx, null);
-//                    }
-//                } else {
-//                    break;
-//                }
-//                //for any result close the sequence as it will be handled by the callback method in statistics
-//            } while (result && !synCtx.getContinuationStateStack().isEmpty());
-////            //((Axis2MessageContext)synCtx).getAxis2MessageContext().getEnvelope().discard();
-
         } catch (SynapseException syne) {
             if (!synCtx.getFaultStack().isEmpty()) {
                 warn(false, "Executing fault handler due to exception encountered", synCtx);
@@ -200,5 +174,10 @@ public class MediatorWorker implements Runnable {
 
     public void setStatisticsCloseEventListener(StatisticsCloseEventListener statisticsCloseEventListener) {
         this.statisticsCloseEventListener = statisticsCloseEventListener;
+    }
+
+    private static boolean isInvokedFromScatterGather(MessageContext synCtx) {
+        Boolean isSkipContinuationState = (Boolean) synCtx.getProperty("SCATTER_MESSAGE");
+        return isSkipContinuationState != null && isSkipContinuationState;
     }
 }

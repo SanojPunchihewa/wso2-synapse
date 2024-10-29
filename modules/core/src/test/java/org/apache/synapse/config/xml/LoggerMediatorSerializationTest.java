@@ -52,7 +52,6 @@ public class LoggerMediatorSerializationTest extends AbstractTestCase {
     private String getXMLOfLoggerWithMessage(String level, String message) {
 
         return "<logger xmlns=\"http://ws.apache.org/ns/synapse\" message=\"" + message + "\" level=\"" + level + "\"></logger>";
-
     }
 
     private String getXMLOfLoggerWithAdditionalParams() {
