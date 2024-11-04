@@ -681,4 +681,6 @@ public final class SynapseConstants {
 
     public static final String  UNKNOWN = "unknown";
     public static final String  VAULT_LOOKUP = "wso2:vault-lookup('";
+    public static final String SCATTER_MESSAGES = "SCATTER_MESSAGES";
+    public static final String CONTINUE_FLOW_TRIGGERED_FROM_MEDIATOR_WORKER = "CONTINUE_FLOW_TRIGGERED_FROM_MEDIATOR_WORKER";
 }
