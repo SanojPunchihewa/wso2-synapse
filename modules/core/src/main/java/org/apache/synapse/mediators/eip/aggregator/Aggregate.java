@@ -26,6 +26,7 @@ import org.apache.synapse.MessageContext;
 import org.apache.synapse.SynapseLog;
 import org.apache.synapse.core.SynapseEnvironment;
 import org.apache.synapse.mediators.eip.EIPConstants;
+import org.apache.synapse.mediators.v2.ForLoop;
 import org.apache.synapse.mediators.v2.ScatterGather;
 
 import java.util.ArrayList;
@@ -52,6 +53,7 @@ public class Aggregate extends TimerTask {
     /** The AggregateMediator that should be invoked on completion of the aggregation */
     private AggregateMediator aggregateMediator = null;
     private ScatterGather scatterGatherMediator = null;
+    private ForLoop forLoopMediator = null;
     private List<MessageContext> messages = new ArrayList<MessageContext>();
     private boolean locked = false;
     private boolean completed = false;
@@ -105,6 +107,24 @@ public class Aggregate extends TimerTask {
         }
         this.faultHandler = faultHandler;
         this.scatterGatherMediator = scatterGatherMediator;
+    }
+
+    public Aggregate(SynapseEnvironment synEnv, String corelation, long timeoutMillis, int min,
+                     int max, ForLoop forLoopMediator, FaultHandler faultHandler) {
+
+        this.synEnv = synEnv;
+        this.correlation = corelation;
+        if (timeoutMillis > 0) {
+            expiryTimeMillis = System.currentTimeMillis() + timeoutMillis;
+        }
+        if (min > 0) {
+            minCount = min;
+        }
+        if (max > 0) {
+            maxCount = max;
+        }
+        this.faultHandler = faultHandler;
+        this.forLoopMediator = forLoopMediator;
     }
 
     /**
