@@ -20,6 +20,7 @@ package org.apache.synapse.config.xml;
 
 import org.apache.axiom.om.OMAttribute;
 import org.apache.axiom.om.OMElement;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.synapse.Mediator;
 import org.apache.synapse.SynapseConstants;
 import org.apache.synapse.mediators.base.SequenceMediator;
@@ -39,7 +40,7 @@ import java.util.Properties;
  * <p/>
  * <p/>
  * <pre>
- * &lt;foreach expression="xpath|jsonpath" [sequence="sequence_ref"] [id="foreach_id"] &gt;
+ * &lt;foreach expression="xpath|jsonpath" [sequence="sequence_ref"] [id="foreach_id"] result-target=(body | variable) &gt;
  *     &lt;sequence&gt;
  *       (mediator)+
  *     &lt;/sequence&gt;?
@@ -56,6 +57,8 @@ public class ForEachMediatorFactory extends AbstractMediatorFactory {
 
     private static final QName CONTINUE_IN_FAULT_Q
             = new QName(XMLConfigConstants.NULL_NAMESPACE, "continueLoopOnFailure");
+
+    private static final QName RESULT_TARGET_Q = new QName("result-target");
 
     public QName getTagQName() {
         return FOREACH_Q;
@@ -108,6 +111,12 @@ public class ForEachMediatorFactory extends AbstractMediatorFactory {
             }
         }
 
+        OMAttribute resultTargetAttr = elem.getAttribute(RESULT_TARGET_Q);
+        if (resultTargetAttr == null || StringUtils.isBlank(resultTargetAttr.getAttributeValue())) {
+            mediator.setResultTarget("body");
+        } else {
+            mediator.setResultTarget(resultTargetAttr.getAttributeValue());
+        }
         addAllCommentChildrenToList(elem, mediator.getCommentsList());
 
         return mediator;

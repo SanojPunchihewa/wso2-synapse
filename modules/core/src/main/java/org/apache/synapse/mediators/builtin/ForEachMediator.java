@@ -21,6 +21,7 @@ package org.apache.synapse.mediators.builtin;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.jayway.jsonpath.DocumentContext;
 import com.jayway.jsonpath.JsonPath;
@@ -31,9 +32,11 @@ import org.apache.axiom.soap.SOAP11Constants;
 import org.apache.axiom.soap.SOAPEnvelope;
 import org.apache.axiom.soap.SOAPFactory;
 import org.apache.axis2.AxisFault;
+import org.apache.synapse.ContinuationState;
 import org.apache.synapse.ManagedLifecycle;
 import org.apache.synapse.Mediator;
 import org.apache.synapse.MessageContext;
+import org.apache.synapse.SynapseConstants;
 import org.apache.synapse.SynapseLog;
 import org.apache.synapse.commons.json.Constants;
 import org.apache.synapse.commons.json.JsonUtil;
@@ -42,16 +45,19 @@ import org.apache.synapse.continuation.ContinuationStackManager;
 import org.apache.synapse.core.SynapseEnvironment;
 import org.apache.synapse.core.axis2.Axis2MessageContext;
 import org.apache.synapse.mediators.AbstractMediator;
+import org.apache.synapse.mediators.FlowContinuableMediator;
 import org.apache.synapse.mediators.base.SequenceMediator;
 import org.apache.synapse.mediators.eip.EIPUtils;
+import org.apache.synapse.util.JSONMergeUtils;
 import org.apache.synapse.util.MessageHelper;
 import org.apache.synapse.util.xpath.SynapseJsonPath;
 import org.apache.synapse.util.xpath.SynapseXPath;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
-public class ForEachMediator extends AbstractMediator implements ManagedLifecycle {
+public class ForEachMediator extends AbstractMediator implements ManagedLifecycle, FlowContinuableMediator {
 
     /* The path that will list the elements to be split */
     private SynapsePath expression = null;
@@ -70,6 +76,8 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
     private static final String FOREACH_ORIGINAL_MESSAGE = "FOREACH_ORIGINAL_MESSAGE";
 
     private static final String FOREACH_COUNTER = "FOREACH_COUNTER";
+
+    private String resultTarget;
 
     public boolean mediate(MessageContext synCtx) {
 
@@ -112,34 +120,21 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
                     " = " + msgCounter);
         }
 
-        if (expression != null && expression instanceof SynapseJsonPath) {
-            //Gson parser to parse the string json objects
-            JsonParser parser = new JsonParser();
+        Object collection = expression.objectValueOf(synCtx);
 
-            //Read the complete JSON payload from the synCtx
-            String jsonPayload = JsonUtil.jsonPayloadToString(((Axis2MessageContext) synCtx).getAxis2MessageContext());
-            DocumentContext parsedJsonPayload = JsonPath.parse(jsonPayload);
-
-            // SynapseJSONPath implementation reads the JSON stream and execute the JSON path.
-            JsonElement iterableChildElements = parsedJsonPayload.read(((SynapseJsonPath) expression).getJsonPath());
-
-            //Check whether the JSON element expressed by the jsonpath is a valid JsonArray
-            //else throw an exception
-            if (!(iterableChildElements instanceof JsonArray)) {
-                handleException("JSON element expressed by the path "
-                        + ((SynapseJsonPath) expression).getJsonPathExpression()
-                        + " is not a valid JSON array", synCtx);
-            }
-            JsonArray iterableJsonArray = iterableChildElements.getAsJsonArray();
-            // If the iterableJsonArray is empty, then no need to continue the mediation
-            if (iterableJsonArray.isEmpty()){
-                log.info("No elements found for the JSONPath : " + expression);
+        if (collection instanceof JsonArray) {
+            JsonArray iterableJsonArray = (JsonArray) collection;
+            if (iterableJsonArray.isEmpty()) {
+                if (synLog.isTraceOrDebugEnabled()) {
+                    synLog.traceOrDebug("No elements found for the expression : " + expression);
+                }
                 return true;
             }
             if (synLog.isTraceOrDebugEnabled()) {
-                synLog.traceOrDebug("Splitting with JSONPath : " + expression + " resulted in " +
+                synLog.traceOrDebug("Splitting with expression : " + expression + " resulted in " +
                         iterableJsonArray.size() + " elements.");
             }
+            synCtx.setProperty("FLOW_TRIGGERED_FROM_SEQUENTIAL_FOREACH", true);
             JsonArray modifiedPayloadArray = new JsonArray();
             for (JsonElement element : iterableJsonArray) {
                 try {
@@ -154,14 +149,14 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
                                         "Continuing with the remaining.", ex);
                             } else {
                                 log.warn("Error occurred while mediating the sequence for the foreach mediator, " +
-                                                ex.getMessage() + ". Continuing with the remaining.");
+                                        ex.getMessage() + ". Continuing with the remaining.");
                             }
                             continue;
                         }
                     } else {
                         mediateResult = mediateSequence(synCtx);
                     }
-                    modifiedPayloadArray.add(EIPUtils.tryParseJsonString(parser,
+                    modifiedPayloadArray.add(EIPUtils.tryParseJsonString(new JsonParser(),
                             JsonUtil.jsonPayloadToString(((Axis2MessageContext) synCtx).getAxis2MessageContext())));
                     msgCounter++;
                     if (synLog.isTraceOrDebugEnabled()) {
@@ -169,7 +164,8 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
                                 + msgCounter);
                     }
                     synCtx.setProperty(counterPropName, msgCounter);
-                    if (!mediateResult && !continueLoopOnFailure) {// break the loop if mediate result is false
+                    // break the loop if mediate result is false and continueLoopOnFailure is false
+                    if (!mediateResult && !continueLoopOnFailure) {
                         break;
                     }
                 } catch (AxisFault axisFault) {
@@ -182,110 +178,222 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
                         }
                         continue;
                     }
-                    handleException("Error updating the stream with iterater element : " +
-                            element.toString(), axisFault, synCtx);
+                    handleException("Error processing the iterator element : " + element, axisFault, synCtx);
                 }
             }
-            JsonElement jsonPayloadElement;
-            if (((SynapseJsonPath) expression).isWholeBody()){
-                jsonPayloadElement = modifiedPayloadArray;
+            // remove FLOW_TRIGGERED_FROM_SEQUENTIAL_FOREACH property
+            Set keySet = synCtx.getPropertyKeySet();
+            keySet.remove("FLOW_TRIGGERED_FROM_SEQUENTIAL_FOREACH");
+
+            if (isTargetBody()) {
+//                JsonElement jsonPayloadElement;
+//                if (((SynapseJsonPath) expression).isWholeBody()){
+//                    jsonPayloadElement = modifiedPayloadArray;
+//                } else {
+//                    jsonPayloadElement = parsedJsonPayload.set(((SynapseJsonPath) expression).getJsonPath(),
+//                            modifiedPayloadArray).json();
+//                }
+//                try {
+//                    JsonUtil.getNewJsonPayload(((Axis2MessageContext) synCtx).getAxis2MessageContext(),
+//                            jsonPayloadElement.toString(), true, true);
+//                } catch (AxisFault af) {
+//                    handleException("Error updating the json stream after foreach transformation", af, synCtx);
+//                }
             } else {
-                jsonPayloadElement = parsedJsonPayload.set(((SynapseJsonPath) expression).getJsonPath(),
-                        modifiedPayloadArray).json();
-            }
-            try {
-                JsonUtil.getNewJsonPayload(((Axis2MessageContext) synCtx).getAxis2MessageContext(),
-                        jsonPayloadElement.toString(), true, true);
-            } catch (AxisFault af) {
-                handleException("Error updating the json stream after foreach transformation", af, synCtx);
-            }
-        } else {
-            SOAPEnvelope processingEnvelope = synCtx.getEnvelope();
-
-            // get the iteration elements and iterate through the list, this call
-            // will also detach all the iteration elements from the message and deduce the
-            // parent node to merge back the mediated content
-            DetachedElementContainer detachedElementContainer =
-                    getDetachedMatchingElements(processingEnvelope, synCtx, (SynapseXPath) expression);
-
-            List<?> splitElements = detachedElementContainer.getDetachedElements();
-
-            int splitElementCount = splitElements.size();
-            if (splitElementCount == 0) {  // Continue the message flow if no matching elements found
-                return true;
-            }
-
-            OMContainer parent = detachedElementContainer.getParent();
-            if (parent == null) {
-                handleException("Error detecting parent element to merge", synCtx);
-            }
-            if (synLog.isTraceOrDebugEnabled()) {
-                synLog.traceOrDebug("Splitting with XPath : " + expression + " resulted in " + splitElementCount +
-                        " elements. Parent node for merging is : " + parent.toString());
-            }
-
-            // iterate through the split elements
-            for (Object element : splitElements) {
-
-                if (!(element instanceof OMNode)) {
-                    handleException("Error splitting message with XPath : " + expression +
-                            " - result not an OMNode", synCtx);
-                }
-                if (synLog.isTraceOrDebugEnabled()) {
-                    synLog.traceOrDebug("Submitting " + msgCounter + " of " + splitElementCount +
-                            " messages for processing in sequentially, in a general loop");
-                }
-
-                MessageContext iteratedMsgCtx = null;
                 try {
-                    iteratedMsgCtx = getIteratedMessage(synCtx, processingEnvelope,
-                            (OMNode) element);
+                    // restore the original message body
+                    synCtx.setEnvelope(originalEnvelope);
+                    // restore the JSON stream
+                    JsonUtil.getNewJsonPayload(((Axis2MessageContext) synCtx).getAxis2MessageContext(),
+                            jsonPayloadElement.toString(), true, true);
 
-                    //Removes the json stream property from the iterated context.
-                    ((Axis2MessageContext) iteratedMsgCtx).getAxis2MessageContext().
-                            removeProperty(Constants.ORG_APACHE_SYNAPSE_COMMONS_JSON_JSON_INPUT_STREAM);
-
-                } catch (AxisFault axisFault) {
-                    handleException("Error creating an iterated copy of the message", axisFault, synCtx);
-                }
-                boolean mediateResult = false;
-                if (continueLoopOnFailure) {
-                    try {
-                        mediateResult = mediateSequence(iteratedMsgCtx);
-                    } catch (Exception ex) {
-                        if (log.isDebugEnabled()) {
-                            log.warn("Error occurred while mediating the sequence for the foreach mediator, " +
-                                    "Continuing with the remaining.", ex);
-                        } else {
-                            log.warn("Error occurred while mediating the sequence for the foreach mediator, " +
-                                    ex.getMessage() + ". Continuing with the remaining.");
-                        }
+                    Object variable = synCtx.getVariable(resultTarget);
+                    if (variable instanceof JsonArray) {
+                        synCtx.setVariable(resultTarget, modifiedPayloadArray);
+                    } else {
+                        handleException("Error appending iteration results to variable : " + resultTarget +
+                                " expected a JSON Array type variable but found " + variable.getClass().getName(), null, synCtx);
                     }
-                } else {
-                    mediateResult = mediateSequence(iteratedMsgCtx);
+                } catch (AxisFault e) {
+                    handleException("Error restoring the original message body after foreach transformation", e, synCtx);
                 }
-                //add the mediated element to the parent from original message context
-                parent.addChild(iteratedMsgCtx.getEnvelope().getBody().getFirstElement());
-
-                msgCounter++;
-                if (synLog.isTraceOrDebugEnabled()) {
-                    synLog.traceOrDebug("Incrementing foreach counter , " + counterPropName + " = "
-                            + msgCounter);
-                }
-                synCtx.setProperty(counterPropName, msgCounter);
-
-                if (!mediateResult && !continueLoopOnFailure) { // break the loop if mediate result is false
-                    break;
-                }
-            }
-
-            //set the modified envelop to message context
-            try {
-                synCtx.setEnvelope(processingEnvelope);
-            } catch (AxisFault axisFault) {
-                handleException("Error while setting the envelope to the message context", axisFault, synCtx);
             }
         }
+
+//        if (expression != null && expression instanceof SynapseJsonPath) {
+//            //Gson parser to parse the string json objects
+//            JsonParser parser = new JsonParser();
+//
+//            //Read the complete JSON payload from the synCtx
+//            String jsonPayload = JsonUtil.jsonPayloadToString(((Axis2MessageContext) synCtx).getAxis2MessageContext());
+//            DocumentContext parsedJsonPayload = JsonPath.parse(jsonPayload);
+//
+//            // SynapseJSONPath implementation reads the JSON stream and execute the JSON path.
+//            JsonElement iterableChildElements = parsedJsonPayload.read(((SynapseJsonPath) expression).getJsonPath());
+//
+//            //Check whether the JSON element expressed by the jsonpath is a valid JsonArray
+//            //else throw an exception
+//            if (!(iterableChildElements instanceof JsonArray)) {
+//                handleException("JSON element expressed by the path "
+//                        + ((SynapseJsonPath) expression).getJsonPathExpression()
+//                        + " is not a valid JSON array", synCtx);
+//            }
+//            JsonArray iterableJsonArray = iterableChildElements.getAsJsonArray();
+//            // If the iterableJsonArray is empty, then no need to continue the mediation
+//            if (iterableJsonArray.isEmpty()){
+//                log.info("No elements found for the JSONPath : " + expression);
+//                return true;
+//            }
+//            if (synLog.isTraceOrDebugEnabled()) {
+//                synLog.traceOrDebug("Splitting with JSONPath : " + expression + " resulted in " +
+//                        iterableJsonArray.size() + " elements.");
+//            }
+//            JsonArray modifiedPayloadArray = new JsonArray();
+//            for (JsonElement element : iterableJsonArray) {
+//                try {
+//                    updateIteratedMessage(synCtx, element);
+//                    boolean mediateResult;
+//                    if (continueLoopOnFailure) {
+//                        try {
+//                            mediateResult = mediateSequence(synCtx);
+//                        } catch (Exception ex) {
+//                            if (log.isDebugEnabled()) {
+//                                log.warn("Error occurred while mediating the sequence for the foreach mediator, " +
+//                                        "Continuing with the remaining.", ex);
+//                            } else {
+//                                log.warn("Error occurred while mediating the sequence for the foreach mediator, " +
+//                                                ex.getMessage() + ". Continuing with the remaining.");
+//                            }
+//                            continue;
+//                        }
+//                    } else {
+//                        mediateResult = mediateSequence(synCtx);
+//                    }
+//                    modifiedPayloadArray.add(EIPUtils.tryParseJsonString(parser,
+//                            JsonUtil.jsonPayloadToString(((Axis2MessageContext) synCtx).getAxis2MessageContext())));
+//                    msgCounter++;
+//                    if (synLog.isTraceOrDebugEnabled()) {
+//                        synLog.traceOrDebug("Incrementing foreach counter , " + counterPropName + " = "
+//                                + msgCounter);
+//                    }
+//                    synCtx.setProperty(counterPropName, msgCounter);
+//                    if (!mediateResult && !continueLoopOnFailure) {// break the loop if mediate result is false
+//                        break;
+//                    }
+//                } catch (AxisFault axisFault) {
+//                    if (continueLoopOnFailure) {
+//                        if (log.isDebugEnabled()) {
+//                            log.warn("Error occurred in the foreach mediator, Continuing with the remaining.", axisFault);
+//                        } else {
+//                            log.warn("Error occurred in the foreach mediator, " + axisFault.getMessage()
+//                                    + ". Continuing with the remaining.");
+//                        }
+//                        continue;
+//                    }
+//                    handleException("Error updating the stream with iterater element : " +
+//                            element.toString(), axisFault, synCtx);
+//                }
+//            }
+//            JsonElement jsonPayloadElement;
+//            if (((SynapseJsonPath) expression).isWholeBody()){
+//                jsonPayloadElement = modifiedPayloadArray;
+//            } else {
+//                jsonPayloadElement = parsedJsonPayload.set(((SynapseJsonPath) expression).getJsonPath(),
+//                        modifiedPayloadArray).json();
+//            }
+//            try {
+//                JsonUtil.getNewJsonPayload(((Axis2MessageContext) synCtx).getAxis2MessageContext(),
+//                        jsonPayloadElement.toString(), true, true);
+//            } catch (AxisFault af) {
+//                handleException("Error updating the json stream after foreach transformation", af, synCtx);
+//            }
+//        } else {
+//            SOAPEnvelope processingEnvelope = synCtx.getEnvelope();
+//
+//            // get the iteration elements and iterate through the list, this call
+//            // will also detach all the iteration elements from the message and deduce the
+//            // parent node to merge back the mediated content
+//            DetachedElementContainer detachedElementContainer =
+//                    getDetachedMatchingElements(processingEnvelope, synCtx, (SynapseXPath) expression);
+//
+//            List<?> splitElements = detachedElementContainer.getDetachedElements();
+//
+//            int splitElementCount = splitElements.size();
+//            if (splitElementCount == 0) {  // Continue the message flow if no matching elements found
+//                return true;
+//            }
+//
+//            OMContainer parent = detachedElementContainer.getParent();
+//            if (parent == null) {
+//                handleException("Error detecting parent element to merge", synCtx);
+//            }
+//            if (synLog.isTraceOrDebugEnabled()) {
+//                synLog.traceOrDebug("Splitting with XPath : " + expression + " resulted in " + splitElementCount +
+//                        " elements. Parent node for merging is : " + parent.toString());
+//            }
+//
+//            // iterate through the split elements
+//            for (Object element : splitElements) {
+//
+//                if (!(element instanceof OMNode)) {
+//                    handleException("Error splitting message with XPath : " + expression +
+//                            " - result not an OMNode", synCtx);
+//                }
+//                if (synLog.isTraceOrDebugEnabled()) {
+//                    synLog.traceOrDebug("Submitting " + msgCounter + " of " + splitElementCount +
+//                            " messages for processing in sequentially, in a general loop");
+//                }
+//
+//                MessageContext iteratedMsgCtx = null;
+//                try {
+//                    iteratedMsgCtx = getIteratedMessage(synCtx, processingEnvelope,
+//                            (OMNode) element);
+//
+//                    //Removes the json stream property from the iterated context.
+//                    ((Axis2MessageContext) iteratedMsgCtx).getAxis2MessageContext().
+//                            removeProperty(Constants.ORG_APACHE_SYNAPSE_COMMONS_JSON_JSON_INPUT_STREAM);
+//
+//                } catch (AxisFault axisFault) {
+//                    handleException("Error creating an iterated copy of the message", axisFault, synCtx);
+//                }
+//                boolean mediateResult = false;
+//                if (continueLoopOnFailure) {
+//                    try {
+//                        mediateResult = mediateSequence(iteratedMsgCtx);
+//                    } catch (Exception ex) {
+//                        if (log.isDebugEnabled()) {
+//                            log.warn("Error occurred while mediating the sequence for the foreach mediator, " +
+//                                    "Continuing with the remaining.", ex);
+//                        } else {
+//                            log.warn("Error occurred while mediating the sequence for the foreach mediator, " +
+//                                    ex.getMessage() + ". Continuing with the remaining.");
+//                        }
+//                    }
+//                } else {
+//                    mediateResult = mediateSequence(iteratedMsgCtx);
+//                }
+//                //add the mediated element to the parent from original message context
+//                parent.addChild(iteratedMsgCtx.getEnvelope().getBody().getFirstElement());
+//
+//                msgCounter++;
+//                if (synLog.isTraceOrDebugEnabled()) {
+//                    synLog.traceOrDebug("Incrementing foreach counter , " + counterPropName + " = "
+//                            + msgCounter);
+//                }
+//                synCtx.setProperty(counterPropName, msgCounter);
+//
+//                if (!mediateResult && !continueLoopOnFailure) { // break the loop if mediate result is false
+//                    break;
+//                }
+//            }
+//
+//            //set the modified envelop to message context
+//            try {
+//                synCtx.setEnvelope(processingEnvelope);
+//            } catch (AxisFault axisFault) {
+//                handleException("Error while setting the envelope to the message context", axisFault, synCtx);
+//            }
+//        }
 
         if (synLog.isTraceOrDebugEnabled()) {
             synLog.traceOrDebug("After mediation foreach counter, " + counterPropName + " = "
@@ -460,6 +568,12 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
         }
     }
 
+    @Override
+    public boolean mediate(MessageContext synCtx, ContinuationState continuationState) {
+
+        return false;
+    }
+
     /**
      * Result container for detached elements and parent
      */
@@ -519,5 +633,20 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
 
     public void setContinueLoopOnFailure(boolean continueOnFail) {
         this.continueLoopOnFailure = continueOnFail;
+    }
+
+    public String getResultTarget() {
+
+        return resultTarget;
+    }
+
+    public void setResultTarget(String resultTarget) {
+
+        this.resultTarget = resultTarget;
+    }
+
+    private boolean isTargetBody() {
+
+        return "body".equalsIgnoreCase(resultTarget);
     }
 }
