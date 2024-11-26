@@ -48,9 +48,7 @@ import java.util.Map;
 public class SynapseExpression extends SynapsePath {
     private static final Log log = LogFactory.getLog(SynapseExpression.class);
     private final ExpressionNode expressionNode;
-    private EvaluationContext context;
-    private final SyntaxErrorListener errorListener;
-    public Map<String,String> namespaceMap = new HashMap<>();
+    private final Map<String,String> namespaceMap = new HashMap<>();
     private boolean isContentAware = false;
 
     public SynapseExpression(String synapseExpression) throws JaxenException {
@@ -61,7 +59,7 @@ public class SynapseExpression extends SynapsePath {
         CommonTokenStream tokens = new CommonTokenStream(lexer);
         ExpressionParser parser = new ExpressionParser(tokens);
         parser.removeErrorListeners();
-        errorListener = new SyntaxErrorListener();
+        SyntaxErrorListener errorListener = new SyntaxErrorListener();
         parser.addErrorListener(errorListener);
 
         ParseTree tree = parser.expression();
@@ -79,35 +77,31 @@ public class SynapseExpression extends SynapsePath {
 
     @Override
     public String stringValueOf(MessageContext synCtx) {
-        context = new EvaluationContext();
+        EvaluationContext context = new EvaluationContext();
         context.setNamespaceMap(namespaceMap);
         context.setSynCtx(synCtx);
-        ExpressionResult result = evaluateExpression(context);
+        ExpressionResult result = evaluateExpression(context, false);
         return result != null ? result.asString() : "";
     }
 
     @Override
     public Object objectValueOf(MessageContext synCtx) {
-        context = new EvaluationContext();
+        EvaluationContext context = new EvaluationContext();
         context.setNamespaceMap(namespaceMap);
         context.setSynCtx(synCtx);
-        ExpressionResult result = evaluateExpression(context);
+        ExpressionResult result = evaluateExpression(context, true);
         return result != null ? result.getValue() : null;
     }
 
-    private ExpressionResult evaluateExpression(EvaluationContext context) {
+    private ExpressionResult evaluateExpression(EvaluationContext context, boolean isObjectValue) {
         ExpressionResult result;
         try {
-            result = expressionNode.evaluate(context);
+            result = expressionNode.evaluate(context, isObjectValue);
         } catch (EvaluationException e) {
             log.warn("Error evaluating expression: " + expression + " cause : " + e.getMessage());
             result = new ExpressionResult(SynapseConstants.UNKNOWN);
         }
         return result;
-    }
-
-    public SyntaxErrorListener getErrorListener() {
-        return errorListener;
     }
 
     public void addNamespace(String var1, String var2) throws JaxenException {

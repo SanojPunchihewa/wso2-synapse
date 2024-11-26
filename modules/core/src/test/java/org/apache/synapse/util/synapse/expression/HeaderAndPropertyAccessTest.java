@@ -17,6 +17,7 @@
  */
 package org.apache.synapse.util.synapse.expression;
 
+import org.apache.synapse.SynapseConstants;
 import org.apache.synapse.commons.json.JsonUtil;
 import org.apache.synapse.core.axis2.Axis2MessageContext;
 import org.apache.synapse.mediators.TestUtils;
@@ -133,7 +134,7 @@ public class HeaderAndPropertyAccessTest {
     @Test
     public void testTransportHeaderNotExist() throws Exception {
         SynapseExpression testPath = new SynapseExpression("headers[\"toUpper2\"]");
-        Assert.assertEquals(null, testPath.stringValueOf(synCtx));
+        Assert.assertEquals(SynapseConstants.UNKNOWN, testPath.stringValueOf(synCtx));
     }
 
     @Test
@@ -187,9 +188,9 @@ public class HeaderAndPropertyAccessTest {
     @Test
     public void testNonExistingEmptyAndNull() throws Exception {
         SynapseExpression testPath = new SynapseExpression("attributes.synapse.nonExisting");
-        Assert.assertEquals(null, testPath.stringValueOf(synCtx));
+        Assert.assertEquals(SynapseConstants.UNKNOWN, testPath.stringValueOf(synCtx));
         testPath = new SynapseExpression("attributes.synapse.[\"null\"]");
-        Assert.assertEquals(null, testPath.stringValueOf(synCtx));
+        Assert.assertEquals(SynapseConstants.UNKNOWN, testPath.stringValueOf(synCtx));
         testPath = new SynapseExpression("attributes.synapse[\"empty\"]");
         Assert.assertEquals("", testPath.stringValueOf(synCtx));
     }

@@ -19,6 +19,7 @@ package org.apache.synapse.util.synapse.expression.ast;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonPrimitive;
+import org.apache.axiom.om.OMNode;
 import org.apache.synapse.SynapseConstants;
 import org.apache.synapse.util.synapse.expression.context.EvaluationContext;
 import org.apache.synapse.util.synapse.expression.exception.EvaluationException;
@@ -54,15 +55,15 @@ public class PredefinedFunctionNode implements ExpressionNode {
     }
 
     @Override
-    public ExpressionResult evaluate(EvaluationContext context) {
+    public ExpressionResult evaluate(EvaluationContext context, boolean isObjectValue) {
         if (arguments.isEmpty()) {
             return handleNoArgumentFunctions();
         } else if (arguments.size() == 1) {
-            return handleSingleArgumentFunctions(context);
+            return handleSingleArgumentFunctions(context, isObjectValue);
         } else if (arguments.size() == 2) {
-            return handleDoubleArgumentFunctions(context);
+            return handleDoubleArgumentFunctions(context, isObjectValue);
         } else if (arguments.size() == 3) {
-            return handleTripleArgumentFunctions(context);
+            return handleTripleArgumentFunctions(context, isObjectValue);
         }
         throw new EvaluationException("Invalid number of arguments: " + arguments.size()
                 + " provided for the function: " + functionName);
@@ -75,11 +76,11 @@ public class PredefinedFunctionNode implements ExpressionNode {
         throw new EvaluationException("Invalid function: " + functionName + " with no arguments");
     }
 
-    private ExpressionResult handleSingleArgumentFunctions(EvaluationContext context) {
+    private ExpressionResult handleSingleArgumentFunctions(EvaluationContext context, boolean isObjectValue) {
         ExpressionResult result = null;
         // do not evaluate the source for exists function - since we need to catch the exception
         if (!functionName.equals(SynapseConstants.EXISTS)) {
-            result = arguments.get(0).evaluate(context);
+            result = arguments.get(0).evaluate(context, isObjectValue);
             checkArguments(result, "source");
         }
         switch (functionName) {
@@ -128,13 +129,13 @@ public class PredefinedFunctionNode implements ExpressionNode {
             case SynapseConstants.REGISTRY:
                 return handleRegistryAccess(context, result, null);
             case SynapseConstants.EXISTS:
-                return handleExistsCheck(context, arguments.get(0));
+                return handleExistsCheck(context, arguments.get(0), isObjectValue);
             case SynapseConstants.OBJECT:
                 return convertToObject(result);
             case SynapseConstants.ARRAY:
                 return convertToArray(result);
             case SynapseConstants.XPATH:
-                return evaluateXPATHExpression(context, result);
+                return evaluateXPATHExpression(context, result, isObjectValue);
             case SynapseConstants.SECRET:
                 return fetchSecretValue(context, result.asString());
             case SynapseConstants.NOT:
@@ -144,9 +145,9 @@ public class PredefinedFunctionNode implements ExpressionNode {
         }
     }
 
-    private ExpressionResult handleDoubleArgumentFunctions(EvaluationContext context) {
-        ExpressionResult source = arguments.get(0).evaluate(context);
-        ExpressionResult argument1 = arguments.get(1).evaluate(context);
+    private ExpressionResult handleDoubleArgumentFunctions(EvaluationContext context, boolean isObjectValue) {
+        ExpressionResult source = arguments.get(0).evaluate(context, isObjectValue);
+        ExpressionResult argument1 = arguments.get(1).evaluate(context, isObjectValue);
         checkArguments(source, "source");
         checkArguments(argument1, "argument1");
         switch (functionName) {
@@ -179,10 +180,10 @@ public class PredefinedFunctionNode implements ExpressionNode {
         }
     }
 
-    private ExpressionResult handleTripleArgumentFunctions(EvaluationContext context) {
-        ExpressionResult source = arguments.get(0).evaluate(context);
-        ExpressionResult argument1 = arguments.get(1).evaluate(context);
-        ExpressionResult argument2 = arguments.get(2).evaluate(context);
+    private ExpressionResult handleTripleArgumentFunctions(EvaluationContext context, boolean isObjectValue) {
+        ExpressionResult source = arguments.get(0).evaluate(context, isObjectValue);
+        ExpressionResult argument1 = arguments.get(1).evaluate(context, isObjectValue);
+        ExpressionResult argument2 = arguments.get(2).evaluate(context, isObjectValue);
         checkArguments(source, "source");
         checkArguments(argument1, "argument1");
         checkArguments(argument2, "argument2");
@@ -573,9 +574,10 @@ public class PredefinedFunctionNode implements ExpressionNode {
                 + ", propKey: " + propKey.asString());
     }
 
-    private ExpressionResult handleExistsCheck(EvaluationContext context, ExpressionNode expression) {
+    private ExpressionResult handleExistsCheck(EvaluationContext context, ExpressionNode expression,
+                                               boolean isObjectValue) {
         try {
-            ExpressionResult result = expression.evaluate(context);
+            ExpressionResult result = expression.evaluate(context, isObjectValue);
             return result != null ? new ExpressionResult(true) : new ExpressionResult(false);
         } catch (EvaluationException e) {
             // this is the only method we are handling the exceptions
@@ -597,9 +599,15 @@ public class PredefinedFunctionNode implements ExpressionNode {
         throw new EvaluationException("Argument cannot be converted to a JSON array");
     }
 
-    private ExpressionResult evaluateXPATHExpression(EvaluationContext context, ExpressionResult expression) {
+    private ExpressionResult evaluateXPATHExpression(EvaluationContext context, ExpressionResult expression,
+                                                     boolean isObjectValue) {
         try {
-            return new ExpressionResult(context.evaluateXpathExpression(expression.asString()));
+            Object result = context.evaluateXpathExpression(expression.asString(), isObjectValue);
+            if (isObjectValue) {
+                return new ExpressionResult((List<?>) result);
+            } else {
+                return new ExpressionResult(result.toString());
+            }
         } catch (JaxenException e) {
             throw new EvaluationException("Invalid XPATH expression : " + expression.asString());
         }

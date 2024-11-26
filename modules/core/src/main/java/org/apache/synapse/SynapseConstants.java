@@ -678,6 +678,7 @@ public final class SynapseConstants {
     public static final String  AXIS2 = "axis2";
     public static final String  QUERY_PARAM = "queryParams";
     public static final String  URI_PARAM = "uriParams";
+    public static final String  FUNC_PARAM = "functionParams";
 
     public static final String  UNKNOWN = "unknown";
     public static final String  VAULT_LOOKUP = "wso2:vault-lookup('";

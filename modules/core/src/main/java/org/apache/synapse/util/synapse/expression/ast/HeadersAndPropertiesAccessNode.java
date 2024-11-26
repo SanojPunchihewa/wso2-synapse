@@ -34,8 +34,7 @@ public class HeadersAndPropertiesAccessNode implements ExpressionNode {
         HEADER,
         PROPERTY,
         CONFIG,
-        QUERY_PARAM,
-        PATH_PARAM
+        FUNCTION_PARAM
     }
 
     private final Type type;
@@ -56,9 +55,9 @@ public class HeadersAndPropertiesAccessNode implements ExpressionNode {
     }
 
     @Override
-    public ExpressionResult evaluate(EvaluationContext context) {
+    public ExpressionResult evaluate(EvaluationContext context, boolean isObjectValue) throws EvaluationException {
         if (key != null) {
-            String name = key.evaluate(context).asString();
+            String name = key.evaluate(context, isObjectValue).asString();
             Object value;
             if (Type.HEADER.equals(type)) {
                 value = context.getHeader(name);
@@ -68,6 +67,8 @@ public class HeadersAndPropertiesAccessNode implements ExpressionNode {
                 } catch (ResolverException e) {
                     throw new EvaluationException("The value of the key:[" + name + "] is null");
                 }
+            } else if (Type.FUNCTION_PARAM.equals(type)) {
+                value = context.getFunctionParam(name);
             } else {
                 if (SynapseConstants.URI_PARAM.equals(scope)) {
                     value = context.getProperty("uri.var." + name, SynapseConstants.SYNAPSE);
@@ -77,7 +78,11 @@ public class HeadersAndPropertiesAccessNode implements ExpressionNode {
                     value = context.getProperty(name, scope);
                 }
             }
-            return new ExpressionResult(value != null ? value.toString() : null);
+            if (value != null) {
+                return new ExpressionResult(value.toString());
+            } else {
+                throw new EvaluationException("Could not fetch the value of the key: " + name);
+            }
         }
         throw new EvaluationException("Key cannot be null when accessing headers or properties");
     }

@@ -38,9 +38,11 @@ import org.apache.synapse.SynapseConstants;
 import org.apache.synapse.util.synapse.expression.context.EvaluationContext;
 import org.apache.synapse.util.synapse.expression.exception.EvaluationException;
 import org.apache.synapse.util.synapse.expression.utils.ExpressionUtils;
+import org.jaxen.JaxenException;
 
 import java.io.IOException;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -90,32 +92,47 @@ public class PayloadAccessNode implements ExpressionNode {
     }
 
     @Override
-    public ExpressionResult evaluate(EvaluationContext context) {
+    public ExpressionResult evaluate(EvaluationContext context, boolean isObjectValue) throws EvaluationException {
         if (expression.startsWith(SynapseConstants.PAYLOAD)) {
             expression = SynapseConstants.PAYLOAD_$ + expression.substring(SynapseConstants.PAYLOAD.length());
         }
 
         for (Map.Entry<String, ExpressionNode> entry : arguments.entrySet()) {
             Optional.ofNullable(entry.getValue())
-                    .map(value -> value.evaluate(context))
+                    .map(value -> value.evaluate(context, isObjectValue))
                     .ifPresent(result -> processResult(entry, result));
         }
 
-        Object result = null;
+        Object result;
         switch (type) {
             case PAYLOAD:
                 try {
-                    result = context.getPayload();
+                    result = context.getPayload(isObjectValue);
                     if (result == null) {
                         throw new EvaluationException("Could not find a JSON payload to evaluate the expression: "
                                 + expression);
                     }
-                    result = JsonPath.parse(context.getPayload().toString()).read(expression);
+                    if (context.isJSON()) {
+                        result = JsonPath.parse(result.toString()).read(expression);
+                    } else {
+                        if (expression.equals(SynapseConstants.PAYLOAD_$)) {
+                            // we only get a list result in XPATH evaluation
+                            if (isObjectValue && result instanceof List) {
+                                return new ExpressionResult((List) result);
+                            } else {
+                                return new ExpressionResult(result.toString());
+                            }
+                        }
+                        throw new EvaluationException("Could not evaluate JSONPath expression: " + expression
+                                + " on non-JSON payload");
+                    }
                 } catch (PathNotFoundException e) {
                     // convert jsonPath error to native one
                     throw new EvaluationException(e.getMessage());
                 } catch (IOException e) {
                     throw new EvaluationException("Error while parsing payload");
+                } catch (JaxenException e) {
+                    throw new EvaluationException("Error while retrieving payload");
                 }
                 break;
             case VARIABLE:
@@ -140,7 +157,7 @@ public class PayloadAccessNode implements ExpressionNode {
                 }
                 break;
             case REGISTRY:
-                ExpressionResult registryValue = predefinedFunctionNode.evaluate(context);
+                ExpressionResult registryValue = predefinedFunctionNode.evaluate(context, isObjectValue);
                 try {
                     if (registryValue == null) {
                         throw new EvaluationException("Could not find a JSON payload to evaluate the expression: " + expression);
@@ -158,7 +175,7 @@ public class PayloadAccessNode implements ExpressionNode {
             case ARRAY:
             case OBJECT:
                 expression = expression.startsWith(".") ? "$" + expression : "$." + expression;
-                ExpressionResult objFuncResult = predefinedFunctionNode.evaluate(context);
+                ExpressionResult objFuncResult = predefinedFunctionNode.evaluate(context, isObjectValue);
                 try {
                     result = JsonPath.parse(objFuncResult.asJsonElement()).read(expression);
                 } catch (PathNotFoundException e) {

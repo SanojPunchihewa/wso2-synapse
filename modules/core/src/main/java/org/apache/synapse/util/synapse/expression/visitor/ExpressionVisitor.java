@@ -458,6 +458,9 @@ public class ExpressionVisitor extends ExpressionParserBaseVisitor<ExpressionNod
                                 SynapseConstants.QUERY_PARAM);
                     case SynapseConstants.URI_PARAM:
                         return new HeadersAndPropertiesAccessNode(visit(ctx.propertyName()), SynapseConstants.URI_PARAM);
+                    case SynapseConstants.FUNC_PARAM:
+                        return new HeadersAndPropertiesAccessNode(visit(ctx.propertyName()),
+                                HeadersAndPropertiesAccessNode.Type.FUNCTION_PARAM);
                 }
             }
         }

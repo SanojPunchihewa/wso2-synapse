@@ -26,6 +26,7 @@ import org.apache.synapse.MessageContext;
 import org.apache.synapse.SynapseConstants;
 import org.apache.synapse.commons.json.JsonUtil;
 import org.apache.synapse.core.axis2.Axis2MessageContext;
+import org.apache.synapse.mediators.template.TemplateContext;
 import org.apache.synapse.registry.Registry;
 import org.apache.synapse.util.xpath.SynapseXPath;
 import org.jaxen.JaxenException;
@@ -34,9 +35,11 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
+import java.util.Stack;
 
 
 import static org.apache.axis2.context.MessageContext.TRANSPORT_HEADERS;
@@ -49,13 +52,16 @@ public class EvaluationContext {
 
     private MessageContext synCtx;
 
-    public Map<String, String> namespaceMap;
+    private Map<String, String> namespaceMap;
+
+    // re-use the payload string to avoid multiple evaluations ex: payload.num1 + payload.num2 requires two evaluations
+    private String payload;
+
+    private Object xpathResult;
+
+    private boolean isJSON = false;
 
     public EvaluationContext() {
-    }
-
-    public void setNamespaceMap(Map<String, String> namespaceMap) {
-        this.namespaceMap = namespaceMap;
     }
 
     // Variable methods
@@ -67,12 +73,29 @@ public class EvaluationContext {
     }
 
     // Payload methods
-    public Object getPayload() throws IOException {
-        if (synCtx != null && JsonUtil.hasAJsonPayload(((Axis2MessageContext) synCtx).getAxis2MessageContext())) {
-            return IOUtils.toString(Objects.requireNonNull(JsonUtil.getJsonPayload(((Axis2MessageContext) synCtx)
-                    .getAxis2MessageContext())));
+    public Object getPayload(boolean isObjectValue) throws IOException, JaxenException {
+        if (payload == null) {
+            if (JsonUtil.hasAJsonPayload(((Axis2MessageContext) synCtx).getAxis2MessageContext())) {
+                payload =  IOUtils.toString(Objects.requireNonNull(JsonUtil.getJsonPayload(((Axis2MessageContext) synCtx)
+                        .getAxis2MessageContext())));
+                isJSON = true;
+                return payload;
+            } else {
+                // handle non-json payloads
+                SynapseXPath xpath = new SynapseXPath("$body");
+                if (isObjectValue) {
+                    // reuse the XML payload without re-evaluating
+                    if (xpathResult == null) {
+                        xpathResult =  xpath.evaluate(synCtx);
+                    }
+                    return xpathResult;
+                } else {
+                    payload =  xpath.stringValueOf(synCtx);
+                    return payload;
+                }
+            }
         } else {
-            return null;
+            return payload;
         }
     }
 
@@ -86,9 +109,6 @@ public class EvaluationContext {
         return null;
     }
 
-    public void setSynCtx(MessageContext synCtx) {
-        this.synCtx = synCtx;
-    }
 
     public Object getProperty(String proName, String scope) {
         if (synCtx != null) {
@@ -96,6 +116,27 @@ public class EvaluationContext {
                 return synCtx.getProperty(proName);
             } else if (SynapseConstants.AXIS2.equals(scope)) {
                 return ((Axis2MessageContext) synCtx).getAxis2MessageContext().getProperty(proName);
+            }
+        }
+        return null;
+    }
+
+    public Object getFunctionParam(String name) {
+        Stack<TemplateContext> functionStack = (Stack) synCtx.getProperty(SynapseConstants.SYNAPSE__FUNCTION__STACK);
+        if (!functionStack.empty()) {
+            TemplateContext topCtxt = functionStack.peek();
+            if (topCtxt != null) {
+                Object result = topCtxt.getParameterValue(name);
+                if (result != null && result instanceof SynapseXPath) {
+                    SynapseXPath expression = (SynapseXPath) topCtxt.getParameterValue(name);
+                    try {
+                        return expression.evaluate(synCtx);
+                    } catch (JaxenException e) {
+                        return null;
+                    }
+                } else {
+                    return result;
+                }
             }
         }
         return null;
@@ -141,16 +182,32 @@ public class EvaluationContext {
      * @return evaluated result
      * @throws JaxenException if an error occurs while evaluating the expression
      */
-    public String evaluateXpathExpression(String expression) throws JaxenException {
+    public Object evaluateXpathExpression(String expression, boolean isObjectValue) throws JaxenException {
         SynapseXPath xpath = new SynapseXPath(expression);
         for (Map.Entry<String, String> entry : namespaceMap.entrySet()) {
             xpath.addNamespace(entry.getKey(), entry.getValue());
         }
-        return xpath.stringValueOf(synCtx);
+        if (isObjectValue) {
+            return xpath.evaluate(synCtx);
+        } else {
+            return xpath.stringValueOf(synCtx);
+        }
     }
 
     public String fetchSecretValue(String alias) throws JaxenException {
         SynapseXPath xpath = new SynapseXPath(SynapseConstants.VAULT_LOOKUP + alias + "')");
         return xpath.stringValueOf(synCtx);
+    }
+
+    public void setSynCtx(MessageContext synCtx) {
+        this.synCtx = synCtx;
+    }
+
+    public void setNamespaceMap(Map<String, String> namespaceMap) {
+        this.namespaceMap = namespaceMap;
+    }
+
+    public boolean isJSON() {
+        return isJSON;
     }
 }
