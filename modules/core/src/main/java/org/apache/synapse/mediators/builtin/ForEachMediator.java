@@ -204,8 +204,8 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
                     // restore the original message body
                     synCtx.setEnvelope(originalEnvelope);
                     // restore the JSON stream
-                    JsonUtil.getNewJsonPayload(((Axis2MessageContext) synCtx).getAxis2MessageContext(),
-                            jsonPayloadElement.toString(), true, true);
+//                    JsonUtil.getNewJsonPayload(((Axis2MessageContext) synCtx).getAxis2MessageContext(),
+//                            jsonPayloadElement.toString(), true, true);
 
                     Object variable = synCtx.getVariable(resultTarget);
                     if (variable instanceof JsonArray) {

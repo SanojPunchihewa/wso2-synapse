@@ -217,7 +217,7 @@ public final class InlineExpressionUtil {
         while (matcher.find()) {
             // Extract the expression inside ${...}
             String placeholder = matcher.group(1);
-            if (placeholder.contains("xpath(") || placeholder.contains("payload.") || placeholder.contains("$.")) {
+            if (placeholder.contains("xpath(") || placeholder.contains("payload") || placeholder.contains("$.")) {
                 return true;
             }
         }

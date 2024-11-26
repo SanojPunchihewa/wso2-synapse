@@ -24,7 +24,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.synapse.Mediator;
 import org.apache.synapse.SynapseException;
 import org.apache.synapse.mediators.eip.Target;
-import org.apache.synapse.mediators.v2.ForLoop;
+import org.apache.synapse.mediators.v2.ForEachMediator;
 import org.apache.synapse.mediators.v2.ScatterGather;
 import org.jaxen.JaxenException;
 
@@ -65,7 +65,7 @@ public class ForLoopMediatorFactory extends AbstractMediatorFactory {
 
         boolean asynchronousExe = true;
 
-        ForLoop mediator = new ForLoop();
+        ForEachMediator mediator = new ForEachMediator();
         processAuditStatus(mediator, elem);
 
         OMAttribute parallelExecAttr = elem.getAttribute(PARALLEL_EXEC_Q);
@@ -90,10 +90,7 @@ public class ForLoopMediatorFactory extends AbstractMediatorFactory {
         }
 
         OMAttribute resultTargetAttr = elem.getAttribute(RESULT_TARGET_Q);
-        if (resultTargetAttr == null || StringUtils.isBlank(resultTargetAttr.getAttributeValue())) {
-            String msg = "The 'result-target' attribute is required for the configuration of a Scatter Gather mediator";
-            throw new SynapseException(msg);
-        } else {
+        if (resultTargetAttr != null && StringUtils.isNotBlank(resultTargetAttr.getAttributeValue())) {
             mediator.setResultTarget(resultTargetAttr.getAttributeValue());
         }
 
@@ -103,7 +100,7 @@ public class ForLoopMediatorFactory extends AbstractMediatorFactory {
             throw new SynapseException(msg);
         } else {
             try {
-                mediator.setCollectionToLoop(SynapsePathFactory.getSynapsePath(elem, ATT_COLLECTION));
+                mediator.setCollection(SynapsePathFactory.getSynapsePath(elem, ATT_COLLECTION));
             } catch (JaxenException e) {
                 String msg = "Unable to build the ForLoop Mediator. Invalid expression "
                         + collectionAttr.getAttributeValue();
