@@ -100,7 +100,7 @@ public class ForLoopMediatorFactory extends AbstractMediatorFactory {
             throw new SynapseException(msg);
         } else {
             try {
-                mediator.setCollection(SynapsePathFactory.getSynapsePath(elem, ATT_COLLECTION));
+                mediator.setCollectionExpression(SynapsePathFactory.getSynapsePath(elem, ATT_COLLECTION));
             } catch (JaxenException e) {
                 String msg = "Unable to build the ForLoop Mediator. Invalid expression "
                         + collectionAttr.getAttributeValue();

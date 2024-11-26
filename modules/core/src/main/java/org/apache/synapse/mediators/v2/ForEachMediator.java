@@ -58,7 +58,7 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
     private final Object lock = new Object();
     private final Map<String, ForLoopAggregate> activeAggregates = Collections.synchronizedMap(new HashMap<>());
     private final String id;
-    private SynapsePath collection = null;
+    private SynapsePath collectionExpression = null;
     private Target target;
     private long completionTimeoutMillis = 0;
     private boolean parallelExecution = true;
@@ -157,11 +157,31 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
             synCtx.setProperty(id != null ? EIPConstants.EIP_SHARED_DATA_HOLDER + "." + id :
                     EIPConstants.EIP_SHARED_DATA_HOLDER, new SharedDataHolder());
 
-            Object collection = this.collection.objectValueOf(synCtx);
+            Object collection = collectionExpression.objectValueOf(synCtx);
 
             if (collection instanceof JsonArray) {
                 int msgNumber = 0;
                 JsonArray list = (JsonArray) collection;
+                if (list.isEmpty()) {
+                    log.info("No elements found for the expression : " + collectionExpression);
+                    return true;
+                }
+                int msgCount = list.size();
+                for (Object item : list) {
+                    MessageContext iteratedMsgCtx = getIteratedMessage(synCtx, msgNumber++, msgCount, item);
+                    ContinuationStackManager.addReliantContinuationState(iteratedMsgCtx, 0, getMediatorPosition());
+                    boolean result = target.mediate(iteratedMsgCtx);
+                    if (!parallelExecution && result) {
+                        aggregationResult = aggregateMessages(iteratedMsgCtx, synLog);
+                    }
+                }
+            } else if (collection instanceof List) {
+                int msgNumber = 0;
+                List list = (List) collection;
+                if (list.isEmpty()) {
+                    log.info("No elements found for the expression : " + collectionExpression);
+                    return true;
+                }
                 int msgCount = list.size();
                 for (Object item : list) {
                     MessageContext iteratedMsgCtx = getIteratedMessage(synCtx, msgNumber++, msgCount, item);
@@ -172,8 +192,7 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
                     }
                 }
             } else {
-                log.warn("No elements found for the expression : " + this.collection);
-                return true;
+                handleException("Expression " + collectionExpression + " did not resolve to a valid array", synCtx);
             }
         } catch (Exception e) {
             handleException("Error executing For Loop mediator", e, synCtx);
@@ -192,27 +211,55 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
 
         MessageContext newCtx = MessageHelper.cloneMessageContext(synCtx, false, false);
         // Adding an empty envelope since JsonUtil.getNewJsonPayload requires an envelope
-        SOAPFactory fac;
-        if (SOAP11Constants.SOAP_ENVELOPE_NAMESPACE_URI.equals(synCtx.getEnvelope().getBody().getNamespace().getNamespaceURI())) {
-            fac = OMAbstractFactory.getSOAP11Factory();
-        } else {
-            fac = OMAbstractFactory.getSOAP12Factory();
-        }
-        SOAPEnvelope newEnvelope = fac.getDefaultEnvelope();
+        SOAPEnvelope newEnvelope = createNewSoapEnvelope(synCtx.getEnvelope());
         newCtx.setEnvelope(newEnvelope);
-
+        if (node instanceof OMNode) {
+            if (newEnvelope.getBody() != null) {
+                newEnvelope.getBody().addChild((OMNode) node);
+            }
+        } else {
+            JsonUtil.getNewJsonPayload(((Axis2MessageContext) newCtx).getAxis2MessageContext(), node.toString(), true,
+                    true);
+        }
         newCtx.setProperty(EIPConstants.AGGREGATE_CORRELATION + "." + id, synCtx.getMessageID());
         newCtx.setProperty(EIPConstants.MESSAGE_SEQUENCE + "." + id, msgNumber + EIPConstants.MESSAGE_SEQUENCE_DELEMITER + msgCount);
         // Set the SCATTER_MESSAGES property to the cloned message context which will be used by the MediatorWorker
         // to continue the mediation from the continuation state
         newCtx.setProperty(SynapseConstants.SCATTER_MESSAGES, true);
-
-        JsonUtil.getNewJsonPayload(((Axis2MessageContext) newCtx).getAxis2MessageContext(), node.toString(), true,
-                true);
-
         ((Axis2MessageContext) newCtx).getAxis2MessageContext().setServerSide(
                 ((Axis2MessageContext) synCtx).getAxis2MessageContext().isServerSide());
         return newCtx;
+    }
+//
+//    private MessageContext getIteratedMessage(MessageContext synCtx, int msgNumber, int msgCount, OMNode omNode) throws AxisFault {
+//
+//        // clone the message context without cloning the SOAP envelope, for the mediation in iteration.
+//        MessageContext newCtx = MessageHelper.cloneMessageContext(synCtx, false, false);
+//
+//        SOAPEnvelope newEnvelope = createNewSoapEnvelope(synCtx.getEnvelope());
+//
+//        newCtx.setEnvelope(newEnvelope);
+//
+//        newCtx.setProperty(EIPConstants.AGGREGATE_CORRELATION + "." + id, synCtx.getMessageID());
+//        newCtx.setProperty(EIPConstants.MESSAGE_SEQUENCE + "." + id, msgNumber +
+//                EIPConstants.MESSAGE_SEQUENCE_DELEMITER + msgCount);
+//        // Set the SCATTER_MESSAGES property to the cloned message context which will be used by the MediatorWorker
+//        // to continue the mediation from the continuation state
+//        newCtx.setProperty(SynapseConstants.SCATTER_MESSAGES, true);
+//        // Set isServerSide property in the cloned message context
+//        ((Axis2MessageContext) newCtx).getAxis2MessageContext().setServerSide(
+//                ((Axis2MessageContext) synCtx).getAxis2MessageContext().isServerSide());
+//        return newCtx;
+//    }
+
+    private SOAPEnvelope createNewSoapEnvelope(SOAPEnvelope envelope) {
+        SOAPFactory fac;
+        if (SOAP11Constants.SOAP_ENVELOPE_NAMESPACE_URI.equals(envelope.getBody().getNamespace().getNamespaceURI())) {
+            fac = OMAbstractFactory.getSOAP11Factory();
+        } else {
+            fac = OMAbstractFactory.getSOAP12Factory();
+        }
+        return fac.getDefaultEnvelope();
     }
 
     public void init(SynapseEnvironment synapseEnv) {
@@ -519,7 +566,7 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
 
     private void updateOriginalPayload(MessageContext originalMessageContext, ForLoopAggregate aggregate) {
 
-        Object collection = this.collection.objectValueOf(originalMessageContext);
+        Object collection = this.collectionExpression.objectValueOf(originalMessageContext);
 
         //Read the complete JSON payload from the synCtx
         String jsonPayload = JsonUtil.jsonPayloadToString(((Axis2MessageContext) originalMessageContext).getAxis2MessageContext());
@@ -544,15 +591,15 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
 //                    }
                 }
             }
-            JsonPath jsonPath = getJsonPathFromExpression(this.collection.getExpression());
+            JsonPath jsonPath = getJsonPathFromExpression(this.collectionExpression.getExpression());
             JsonElement jsonPayloadElement;
             if (isWholeContent(jsonPath)) {
                 jsonPayloadElement = jsonArray;
             } else {
                 jsonPayloadElement = parsedJsonPayload.set(jsonPath, jsonArray).json();
             }
-            if (isCollectionReferencedByVariable(this.collection)) {
-                String variableName = getVariableName(this.collection);
+            if (isCollectionReferencedByVariable(this.collectionExpression)) {
+                String variableName = getVariableName(this.collectionExpression);
                 originalMessageContext.setVariable(variableName, jsonPayloadElement);
             } else {
                 try {
@@ -639,14 +686,14 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
         this.resultTarget = resultTarget;
     }
 
-    public SynapsePath getCollection() {
+    public SynapsePath getCollectionExpression() {
 
-        return collection;
+        return collectionExpression;
     }
 
-    public void setCollection(SynapsePath collection) {
+    public void setCollectionExpression(SynapsePath collectionExpression) {
 
-        this.collection = collection;
+        this.collectionExpression = collectionExpression;
     }
 
     public boolean getParallelExecution() {

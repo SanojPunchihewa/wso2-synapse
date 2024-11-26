@@ -19,6 +19,7 @@ package org.apache.synapse.util.synapse.expression.ast;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonPrimitive;
+import org.apache.axiom.om.OMNode;
 import org.apache.synapse.SynapseConstants;
 import org.apache.synapse.util.synapse.expression.context.EvaluationContext;
 import org.apache.synapse.util.synapse.expression.exception.EvaluationException;
@@ -599,7 +600,15 @@ public class PredefinedFunctionNode implements ExpressionNode {
 
     private ExpressionResult evaluateXPATHExpression(EvaluationContext context, ExpressionResult expression) {
         try {
-            return new ExpressionResult(context.evaluateXpathExpression(expression.asString()));
+            Object result = context.evaluateXpathExpression(expression.asString());
+            if (result instanceof OMNode) {
+                return new ExpressionResult((OMNode) result);
+            } else if (result instanceof List) {
+                return new ExpressionResult((List<?>) result);
+            } else if (result instanceof String) {
+                return new ExpressionResult((String) result);
+            }
+            throw new EvaluationException("Invalid output from xpath expression : " + expression.asString());
         } catch (JaxenException e) {
             throw new EvaluationException("Invalid XPATH expression : " + expression.asString());
         }

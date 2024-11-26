@@ -31,6 +31,7 @@ import com.jayway.jsonpath.spi.json.GsonJsonProvider;
 import com.jayway.jsonpath.spi.json.JsonProvider;
 import com.jayway.jsonpath.spi.mapper.GsonMappingProvider;
 import com.jayway.jsonpath.spi.mapper.MappingProvider;
+import org.apache.axiom.om.OMNode;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -38,9 +39,11 @@ import org.apache.synapse.SynapseConstants;
 import org.apache.synapse.util.synapse.expression.context.EvaluationContext;
 import org.apache.synapse.util.synapse.expression.exception.EvaluationException;
 import org.apache.synapse.util.synapse.expression.utils.ExpressionUtils;
+import org.jaxen.JaxenException;
 
 import java.io.IOException;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -110,12 +113,28 @@ public class PayloadAccessNode implements ExpressionNode {
                         throw new EvaluationException("Could not find a JSON payload to evaluate the expression: "
                                 + expression);
                     }
-                    result = JsonPath.parse(context.getPayload().toString()).read(expression);
+                    if (result instanceof String) {
+                        result = JsonPath.parse(context.getPayload().toString()).read(expression);
+                    } else {
+                        if (expression.equals(SynapseConstants.PAYLOAD_$)) {
+                            if (result instanceof OMNode) {
+                                return new ExpressionResult((OMNode) result);
+                            } else if (result instanceof List) {
+                                return new ExpressionResult((List) result);
+                            } else {
+                                return new ExpressionResult(result.toString());
+                            }
+                        }
+                        throw new EvaluationException("Could not evaluate JSONPath expression: " + expression
+                                + " on non-JSON payload");
+                    }
                 } catch (PathNotFoundException e) {
                     // convert jsonPath error to native one
                     throw new EvaluationException(e.getMessage());
                 } catch (IOException e) {
                     throw new EvaluationException("Error while parsing payload");
+                } catch (JaxenException e) {
+                    throw new EvaluationException("Error while retrieving payload");
                 }
                 break;
             case VARIABLE:

@@ -67,12 +67,14 @@ public class EvaluationContext {
     }
 
     // Payload methods
-    public Object getPayload() throws IOException {
+    public Object getPayload() throws IOException, JaxenException {
         if (synCtx != null && JsonUtil.hasAJsonPayload(((Axis2MessageContext) synCtx).getAxis2MessageContext())) {
             return IOUtils.toString(Objects.requireNonNull(JsonUtil.getJsonPayload(((Axis2MessageContext) synCtx)
                     .getAxis2MessageContext())));
         } else {
-            return null;
+            // handle non-json payloads
+            SynapseXPath xpath = new SynapseXPath("$body");
+            return xpath.evaluate(synCtx);
         }
     }
 
@@ -141,12 +143,12 @@ public class EvaluationContext {
      * @return evaluated result
      * @throws JaxenException if an error occurs while evaluating the expression
      */
-    public String evaluateXpathExpression(String expression) throws JaxenException {
+    public Object evaluateXpathExpression(String expression) throws JaxenException {
         SynapseXPath xpath = new SynapseXPath(expression);
         for (Map.Entry<String, String> entry : namespaceMap.entrySet()) {
             xpath.addNamespace(entry.getKey(), entry.getValue());
         }
-        return xpath.stringValueOf(synCtx);
+        return xpath.evaluate(synCtx);
     }
 
     public String fetchSecretValue(String alias) throws JaxenException {
