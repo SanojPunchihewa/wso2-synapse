@@ -18,36 +18,66 @@
 
 package org.apache.synapse.mediators.v2;
 
-import com.google.gson.*;
-import com.jayway.jsonpath.*;
-import java.io.*;
-import java.util.*;
-import javax.xml.stream.*;
-import org.apache.axiom.om.*;
-import org.apache.axiom.soap.*;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.jayway.jsonpath.DocumentContext;
+import com.jayway.jsonpath.JsonPath;
+import org.apache.axiom.om.OMAbstractFactory;
+import org.apache.axiom.om.OMElement;
+import org.apache.axiom.om.OMNode;
+import org.apache.axiom.soap.SOAP11Constants;
+import org.apache.axiom.soap.SOAPEnvelope;
+import org.apache.axiom.soap.SOAPFactory;
+import org.apache.axis2.AxisFault;
 import org.apache.axis2.Constants;
-import org.apache.axis2.*;
-import org.apache.axis2.context.*;
-import org.apache.http.protocol.*;
+import org.apache.axis2.context.OperationContext;
+import org.apache.http.protocol.HTTP;
+import org.apache.synapse.ContinuationState;
+import org.apache.synapse.ManagedLifecycle;
+import org.apache.synapse.Mediator;
 import org.apache.synapse.MessageContext;
-import org.apache.synapse.*;
-import org.apache.synapse.aspects.*;
-import org.apache.synapse.aspects.flow.statistics.*;
-import org.apache.synapse.aspects.flow.statistics.collectors.*;
-import org.apache.synapse.aspects.flow.statistics.data.artifact.*;
-import org.apache.synapse.aspects.flow.statistics.util.*;
-import org.apache.synapse.commons.json.*;
-import org.apache.synapse.config.xml.*;
-import org.apache.synapse.continuation.*;
-import org.apache.synapse.core.*;
-import org.apache.synapse.core.axis2.*;
-import org.apache.synapse.endpoints.auth.oauth.*;
-import org.apache.synapse.mediators.*;
-import org.apache.synapse.mediators.base.*;
-import org.apache.synapse.mediators.eip.*;
-import org.apache.synapse.mediators.eip.aggregator.*;
-import org.apache.synapse.transport.passthru.util.*;
-import org.apache.synapse.util.*;
+import org.apache.synapse.SynapseConstants;
+import org.apache.synapse.SynapseLog;
+import org.apache.synapse.aspects.AspectConfiguration;
+import org.apache.synapse.aspects.ComponentType;
+import org.apache.synapse.aspects.flow.statistics.StatisticIdentityGenerator;
+import org.apache.synapse.aspects.flow.statistics.collectors.CloseEventCollector;
+import org.apache.synapse.aspects.flow.statistics.collectors.OpenEventCollector;
+import org.apache.synapse.aspects.flow.statistics.collectors.RuntimeStatisticCollector;
+import org.apache.synapse.aspects.flow.statistics.data.artifact.ArtifactHolder;
+import org.apache.synapse.aspects.flow.statistics.util.StatisticDataCollectionHelper;
+import org.apache.synapse.aspects.flow.statistics.util.StatisticsConstants;
+import org.apache.synapse.commons.json.JsonUtil;
+import org.apache.synapse.config.xml.SynapsePath;
+import org.apache.synapse.continuation.ContinuationStackManager;
+import org.apache.synapse.continuation.SeqContinuationState;
+import org.apache.synapse.core.SynapseEnvironment;
+import org.apache.synapse.core.axis2.Axis2MessageContext;
+import org.apache.synapse.endpoints.auth.oauth.MessageCache;
+import org.apache.synapse.mediators.AbstractMediator;
+import org.apache.synapse.mediators.FlowContinuableMediator;
+import org.apache.synapse.mediators.base.SequenceMediator;
+import org.apache.synapse.mediators.eip.EIPConstants;
+import org.apache.synapse.mediators.eip.EIPUtils;
+import org.apache.synapse.mediators.eip.SharedDataHolder;
+import org.apache.synapse.mediators.eip.Target;
+import org.apache.synapse.mediators.eip.aggregator.ForLoopAggregate;
+import org.apache.synapse.transport.passthru.util.RelayUtils;
+import org.apache.synapse.util.MessageHelper;
+import org.apache.synapse.util.xpath.SynapseExpression;
+import org.jaxen.JaxenException;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Random;
+import java.util.Timer;
+import javax.xml.stream.XMLStreamException;
 
 public class ForEachMediator extends AbstractMediator implements ManagedLifecycle, FlowContinuableMediator {
 
@@ -65,6 +95,7 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
     private Integer statisticReportingIndex;
     private String contentType;
     private String resultTarget = null;
+    private String counterVariableName = null;
     private SynapseEnvironment synapseEnv;
 
     public ForEachMediator() {
@@ -226,6 +257,9 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
         // Set the SCATTER_MESSAGES property to the cloned message context which will be used by the MediatorWorker
         // to continue the mediation from the continuation state
         newCtx.setProperty(SynapseConstants.SCATTER_MESSAGES, true);
+        if (!parallelExecution && counterVariableName != null) {
+            newCtx.setVariable(counterVariableName, msgNumber);
+        }
         ((Axis2MessageContext) newCtx).getAxis2MessageContext().setServerSide(
                 ((Axis2MessageContext) synCtx).getAxis2MessageContext().isServerSide());
         return newCtx;
@@ -253,6 +287,7 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
 //    }
 
     private SOAPEnvelope createNewSoapEnvelope(SOAPEnvelope envelope) {
+
         SOAPFactory fac;
         if (SOAP11Constants.SOAP_ENVELOPE_NAMESPACE_URI.equals(envelope.getBody().getNamespace().getNamespaceURI())) {
             fac = OMAbstractFactory.getSOAP11Factory();
@@ -543,9 +578,16 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
                 if (variable instanceof JsonObject) {
                     Object prop = synCtx.getProperty(EIPConstants.MESSAGE_SEQUENCE + "." + id);
                     String[] msgSequence = prop.toString().split(EIPConstants.MESSAGE_SEQUENCE_DELEMITER);
-                    JsonElement result = (EIPUtils.tryParseJsonString(new JsonParser(),
-                            JsonUtil.jsonPayloadToString(((Axis2MessageContext) synCtx).getAxis2MessageContext())));
-                    ((JsonElement) variable).getAsJsonObject().add(msgSequence[0], result);
+                    JsonElement jsonElement = null;
+                    try {
+                        Object result = new SynapseExpression("payload").objectValueOf(synCtx);
+                        if (result instanceof JsonElement) {
+                            jsonElement = (JsonElement) result;
+                        }
+                    } catch (JaxenException e) {
+                        log.warn("Error extracting the JSON payload for iteration : " + msgSequence[0]);
+                    }
+                    ((JsonElement) variable).getAsJsonObject().add(msgSequence[0], jsonElement);
                 } else {
                     handleException(aggregate, "Error merging aggregation results to variable : " + resultTarget +
                             " expected a JSON type variable but found " + variable.getClass().getName(), null, synCtx);
@@ -578,9 +620,16 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
                 if (Objects.equals(contentType, JSON_TYPE)) {
                     Object prop = synCtx.getProperty(EIPConstants.MESSAGE_SEQUENCE + "." + id);
                     String[] msgSequence = prop.toString().split(EIPConstants.MESSAGE_SEQUENCE_DELEMITER);
-                    JsonElement result = (EIPUtils.tryParseJsonString(new JsonParser(),
-                            JsonUtil.jsonPayloadToString(((Axis2MessageContext) synCtx).getAxis2MessageContext())));
-                    jsonArray.set(Integer.parseInt(msgSequence[0]), result);
+                    JsonElement jsonElement = null;
+                    try {
+                        Object result = new SynapseExpression("payload").objectValueOf(synCtx);
+                        if (result instanceof JsonElement) {
+                            jsonElement = (JsonElement) result;
+                        }
+                    } catch (JaxenException e) {
+                        log.warn("Error extracting the JSON payload for iteration : " + msgSequence[0]);
+                    }
+                    jsonArray.set(Integer.parseInt(msgSequence[0]), jsonElement);
                 } else {
 //                    if (variable instanceof OMElement) {
 //                        List list = getMatchingElements(synCtx, aggregationExpression);
@@ -712,6 +761,7 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
     }
 
     public String getId() {
+
         return id;
     }
 
@@ -741,5 +791,15 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
     private boolean isWholeContent(JsonPath jsonPath) {
 
         return "$".equals(jsonPath.getPath().trim()) || "$.".equals(jsonPath.getPath().trim());
+    }
+
+    public String getCounterVariable() {
+
+        return counterVariableName;
+    }
+
+    public void setCounterVariable(String counterVariableName) {
+
+        this.counterVariableName = counterVariableName;
     }
 }

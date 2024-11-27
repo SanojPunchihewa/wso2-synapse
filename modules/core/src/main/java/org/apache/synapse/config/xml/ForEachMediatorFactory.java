@@ -28,6 +28,8 @@ import org.apache.synapse.mediators.builtin.CallMediator;
 import org.apache.synapse.mediators.builtin.CalloutMediator;
 import org.apache.synapse.mediators.builtin.ForEachMediator;
 import org.apache.synapse.mediators.builtin.SendMediator;
+import org.apache.synapse.mediators.eip.Target;
+import org.apache.synapse.mediators.v2.ScatterGather;
 import org.jaxen.JaxenException;
 
 import javax.xml.namespace.QName;
@@ -40,7 +42,7 @@ import java.util.Properties;
  * <p/>
  * <p/>
  * <pre>
- * &lt;foreach expression="xpath|jsonpath" [sequence="sequence_ref"] [id="foreach_id"] result-target=(body | variable) &gt;
+ * &lt;foreach expression="xpath|jsonpath" [sequence="sequence_ref"] [id="foreach_id"] &gt;
  *     &lt;sequence&gt;
  *       (mediator)+
  *     &lt;/sequence&gt;?
@@ -58,7 +60,14 @@ public class ForEachMediatorFactory extends AbstractMediatorFactory {
     private static final QName CONTINUE_IN_FAULT_Q
             = new QName(XMLConfigConstants.NULL_NAMESPACE, "continueLoopOnFailure");
 
+    private static final QName VERSION_Q = new QName("version");
+    private static final QName ATT_COLLECTION = new QName("collection");
+    private static final QName ATT_TIMEOUT = new QName("timeout");
+    private static final QName SEQUENCE_Q = new QName(XMLConfigConstants.SYNAPSE_NAMESPACE, "sequence");
+    private static final QName PARALLEL_EXEC_Q = new QName("parallel-execution");
     private static final QName RESULT_TARGET_Q = new QName("result-target");
+    private static final QName CONTENT_TYPE_Q = new QName("content-type");
+    private static final QName ATT_COUNTER_VARIABLE = new QName("counter-variable");
 
     public QName getTagQName() {
         return FOREACH_Q;
@@ -67,6 +76,13 @@ public class ForEachMediatorFactory extends AbstractMediatorFactory {
     @Override
     protected Mediator createSpecificMediator(OMElement elem,
                                               Properties properties) {
+
+        OMAttribute versionAttr = elem.getAttribute(VERSION_Q);
+        if (versionAttr != null && StringUtils.isNotBlank(versionAttr.getAttributeValue()) &&
+                "v2".equals(versionAttr.getAttributeValue())) {
+            return createForEachMediatorV2(elem, properties);
+        }
+
         ForEachMediator mediator = new ForEachMediator();
         processAuditStatus(mediator, elem);
 
@@ -86,12 +102,12 @@ public class ForEachMediatorFactory extends AbstractMediatorFactory {
                 mediator.setExpression(SynapsePathFactory.getSynapsePath(elem, ATT_EXPRN));
             } catch (JaxenException e) {
                 handleException("Unable to build the ForEach Mediator. " +
-                                "Invalid XPath/JSONPath " +
-                                expression.getAttributeValue(), e);
+                        "Invalid XPath/JSONPath " +
+                        expression.getAttributeValue(), e);
             }
         } else {
             handleException("XPath/JSONPath expression is required "
-                            + "for an ForEach Mediator under the \"expression\" attribute");
+                    + "for an ForEach Mediator under the \"expression\" attribute");
         }
 
         OMAttribute sequenceAttr = elem.getAttribute(
@@ -111,12 +127,6 @@ public class ForEachMediatorFactory extends AbstractMediatorFactory {
             }
         }
 
-        OMAttribute resultTargetAttr = elem.getAttribute(RESULT_TARGET_Q);
-        if (resultTargetAttr == null || StringUtils.isBlank(resultTargetAttr.getAttributeValue())) {
-            mediator.setResultTarget("body");
-        } else {
-            mediator.setResultTarget(resultTargetAttr.getAttributeValue());
-        }
         addAllCommentChildrenToList(elem, mediator.getCommentsList());
 
         return mediator;
@@ -127,7 +137,7 @@ public class ForEachMediatorFactory extends AbstractMediatorFactory {
             List<Mediator> mediators = sequence.getList();
             for (Mediator m : mediators) {
                 if (m instanceof CallMediator || m instanceof CalloutMediator ||
-                    m instanceof SendMediator) {
+                        m instanceof SendMediator) {
                     return false;
                 }
             }
@@ -135,4 +145,68 @@ public class ForEachMediatorFactory extends AbstractMediatorFactory {
         return true;
     }
 
+    public Mediator createForEachMediatorV2(OMElement elem, Properties properties) {
+
+        boolean asynchronousExe = true;
+
+        org.apache.synapse.mediators.v2.ForEachMediator mediator = new org.apache.synapse.mediators.v2.ForEachMediator();
+        processAuditStatus(mediator, elem);
+
+        OMAttribute parallelExecAttr = elem.getAttribute(PARALLEL_EXEC_Q);
+        if (parallelExecAttr != null && parallelExecAttr.getAttributeValue().equals("false")) {
+            asynchronousExe = false;
+        }
+        mediator.setParallelExecution(asynchronousExe);
+
+        OMAttribute contentTypeAttr = elem.getAttribute(CONTENT_TYPE_Q);
+        if (contentTypeAttr == null || StringUtils.isBlank(contentTypeAttr.getAttributeValue())) {
+            handleException("The 'content-type' attribute is required for the configuration of a Foreach mediator");
+        } else {
+            if ("JSON".equals(contentTypeAttr.getAttributeValue())) {
+                mediator.setContentType(ScatterGather.JSON_TYPE);
+            } else if ("XML".equals(contentTypeAttr.getAttributeValue())) {
+                mediator.setContentType(ScatterGather.XML_TYPE);
+            } else {
+                handleException("The 'content-type' attribute should be either 'JSON' or 'XML'");
+            }
+        }
+
+        OMAttribute resultTargetAttr = elem.getAttribute(RESULT_TARGET_Q);
+        if (resultTargetAttr != null && StringUtils.isNotBlank(resultTargetAttr.getAttributeValue())) {
+            mediator.setResultTarget(resultTargetAttr.getAttributeValue());
+        }
+
+        OMAttribute counterVariableAttr = elem.getAttribute(ATT_COUNTER_VARIABLE);
+        if (counterVariableAttr != null && StringUtils.isNotBlank(counterVariableAttr.getAttributeValue())) {
+            if (asynchronousExe) {
+                handleException("The 'counter-variable' attribute is not allowed when parallel-execution is true");
+            }
+            mediator.setCounterVariable(counterVariableAttr.getAttributeValue());
+        }
+
+        OMAttribute collectionAttr = elem.getAttribute(ATT_COLLECTION);
+        if (collectionAttr == null || StringUtils.isBlank(collectionAttr.getAttributeValue())) {
+            handleException("The 'collection' attribute is required for the configuration of a Foreach mediator");
+        } else {
+            try {
+                mediator.setCollectionExpression(SynapsePathFactory.getSynapsePath(elem, ATT_COLLECTION));
+            } catch (JaxenException e) {
+                handleException("Unable to build the Foreach Mediator. Invalid expression "
+                        + collectionAttr.getAttributeValue(), e);
+            }
+        }
+
+        OMElement sequenceElement = elem.getFirstChildWithName(SEQUENCE_Q);
+        if (sequenceElement == null) {
+            handleException("A 'sequence' element is required for the configuration of a Foreach mediator");
+        } else {
+            Target target = new Target();
+            SequenceMediatorFactory fac = new SequenceMediatorFactory();
+            target.setSequence(fac.createAnonymousSequence(sequenceElement, properties));
+            target.setAsynchronous(asynchronousExe);
+            mediator.setTarget(target);
+        }
+        addAllCommentChildrenToList(elem, mediator.getCommentsList());
+        return mediator;
+    }
 }
