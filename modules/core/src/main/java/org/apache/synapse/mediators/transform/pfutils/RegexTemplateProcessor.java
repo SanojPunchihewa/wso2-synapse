@@ -92,7 +92,7 @@ public class RegexTemplateProcessor extends TemplateProcessor {
                 if (matcher.group(1) != null) {
                     // Handle "${...}" pattern (with quotes)
                     String expression = matcher.group(1);
-                    Object expressionResult = new SynapseExpression(expression).objectValueOf(synCtx);
+                    Object expressionResult = evaluateExpression(expression, synCtx);
                     if (expressionResult instanceof JsonPrimitive) {
                         replacementValue = ((JsonPrimitive) expressionResult).getAsString();
                         if (XML_TYPE.equals(mediaType)) {
@@ -117,7 +117,7 @@ public class RegexTemplateProcessor extends TemplateProcessor {
                 } else if (matcher.group(2) != null) {
                     // Handle ${...} pattern (without quotes)
                     String expression = matcher.group(2);
-                    Object expressionResult = new SynapseExpression(expression).objectValueOf(synCtx);
+                    Object expressionResult = evaluateExpression(expression, synCtx);
                     replacementValue = expressionResult.toString();
                     if (expressionResult instanceof JsonPrimitive) {
                         replacementValue = ((JsonPrimitive) expressionResult).getAsString();
@@ -150,6 +150,23 @@ public class RegexTemplateProcessor extends TemplateProcessor {
             throw new SynapseException("Error evaluating expression" , e);
         }
         matcher.appendTail(result);
+    }
+
+    /**
+     * Evaluates the expression and returns the result as a string or an object.
+     * If the expression contains "xpath(", we meed to evaluate it as a string.
+     *
+     * @param expression expression to evaluate
+     * @param synCtx     message context
+     * @return evaluated result
+     * @throws JaxenException
+     */
+    private Object evaluateExpression(String expression, MessageContext synCtx) throws JaxenException {
+
+        if (expression.contains("xpath(")) {
+            return new SynapseExpression(expression).stringValueOf(synCtx);
+        }
+        return new SynapseExpression(expression).objectValueOf(synCtx);
     }
 
     private String escapeJson(String value) {

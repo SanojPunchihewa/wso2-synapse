@@ -169,6 +169,11 @@ public class VariableMediator extends AbstractMediator {
             return value;
         } else {
             if (expression != null) {
+                if (isOMType(type)) {
+                    return buildOMElement(expression.stringValueOf(synCtx));
+                } else if (isStringType(type)) {
+                    return expression.stringValueOf(synCtx);
+                }
                 return convertExpressionResult(expression.objectValueOf(synCtx), type);
             }
         }
@@ -330,6 +335,16 @@ public class VariableMediator extends AbstractMediator {
         String msg = "Expression '${" + expression + "}' result does not match the expected data type '" + dataType + "'";
         log.error(msg);
         throw new SynapseException(msg);
+    }
+
+    private boolean isOMType(String type) {
+
+        return type != null && XMLConfigConstants.DATA_TYPES.OM.equals(XMLConfigConstants.DATA_TYPES.valueOf(type));
+    }
+
+    private boolean isStringType(String type) {
+
+        return type != null && XMLConfigConstants.DATA_TYPES.STRING.equals(XMLConfigConstants.DATA_TYPES.valueOf(type));
     }
 
     @Override
