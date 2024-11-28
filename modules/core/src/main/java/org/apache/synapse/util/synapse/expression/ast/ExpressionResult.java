@@ -47,11 +47,7 @@ public class ExpressionResult {
         this.value = value;
     }
 
-    public ExpressionResult(OMNode value) {
-        this.value = value;
-    }
-
-    public ExpressionResult(List value) {
+    public ExpressionResult(OMElement value) {
         this.value = value;
     }
 
