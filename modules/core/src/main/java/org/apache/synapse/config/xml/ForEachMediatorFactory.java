@@ -29,7 +29,6 @@ import org.apache.synapse.mediators.builtin.CalloutMediator;
 import org.apache.synapse.mediators.builtin.ForEachMediator;
 import org.apache.synapse.mediators.builtin.SendMediator;
 import org.apache.synapse.mediators.eip.Target;
-import org.apache.synapse.mediators.v2.ScatterGather;
 import org.jaxen.JaxenException;
 
 import javax.xml.namespace.QName;
@@ -62,7 +61,6 @@ public class ForEachMediatorFactory extends AbstractMediatorFactory {
 
     private static final QName VERSION_Q = new QName("version");
     private static final QName ATT_COLLECTION = new QName("collection");
-    private static final QName ATT_TIMEOUT = new QName("timeout");
     private static final QName SEQUENCE_Q = new QName(XMLConfigConstants.SYNAPSE_NAMESPACE, "sequence");
     private static final QName PARALLEL_EXEC_Q = new QName("parallel-execution");
     private static final QName RESULT_TARGET_Q = new QName("result-target");
@@ -163,9 +161,9 @@ public class ForEachMediatorFactory extends AbstractMediatorFactory {
             handleException("The 'content-type' attribute is required for the configuration of a Foreach mediator");
         } else {
             if ("JSON".equals(contentTypeAttr.getAttributeValue())) {
-                mediator.setContentType(ScatterGather.JSON_TYPE);
+                mediator.setContentType(org.apache.synapse.mediators.v2.ForEachMediator.JSON_TYPE);
             } else if ("XML".equals(contentTypeAttr.getAttributeValue())) {
-                mediator.setContentType(ScatterGather.XML_TYPE);
+                mediator.setContentType(org.apache.synapse.mediators.v2.ForEachMediator.XML_TYPE);
             } else {
                 handleException("The 'content-type' attribute should be either 'JSON' or 'XML'");
             }

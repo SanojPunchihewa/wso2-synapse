@@ -25,6 +25,7 @@ import com.jayway.jsonpath.DocumentContext;
 import com.jayway.jsonpath.JsonPath;
 import org.apache.axiom.om.OMAbstractFactory;
 import org.apache.axiom.om.OMElement;
+import org.apache.axiom.om.OMFactory;
 import org.apache.axiom.om.OMNode;
 import org.apache.axiom.soap.SOAP11Constants;
 import org.apache.axiom.soap.SOAPEnvelope;
@@ -32,7 +33,6 @@ import org.apache.axiom.soap.SOAPFactory;
 import org.apache.axis2.AxisFault;
 import org.apache.axis2.Constants;
 import org.apache.axis2.context.OperationContext;
-import org.apache.http.protocol.HTTP;
 import org.apache.synapse.ContinuationState;
 import org.apache.synapse.ManagedLifecycle;
 import org.apache.synapse.Mediator;
@@ -59,24 +59,23 @@ import org.apache.synapse.mediators.AbstractMediator;
 import org.apache.synapse.mediators.FlowContinuableMediator;
 import org.apache.synapse.mediators.base.SequenceMediator;
 import org.apache.synapse.mediators.eip.EIPConstants;
-import org.apache.synapse.mediators.eip.EIPUtils;
 import org.apache.synapse.mediators.eip.SharedDataHolder;
 import org.apache.synapse.mediators.eip.Target;
-import org.apache.synapse.mediators.eip.aggregator.ForLoopAggregate;
+import org.apache.synapse.mediators.eip.aggregator.ForEachAggregate;
 import org.apache.synapse.transport.passthru.util.RelayUtils;
 import org.apache.synapse.util.MessageHelper;
 import org.apache.synapse.util.xpath.SynapseExpression;
+import org.apache.synapse.util.xpath.SynapseXPath;
 import org.jaxen.JaxenException;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
-import java.util.Timer;
+import javax.xml.namespace.QName;
 import javax.xml.stream.XMLStreamException;
 
 public class ForEachMediator extends AbstractMediator implements ManagedLifecycle, FlowContinuableMediator {
@@ -86,11 +85,10 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
     private static final String FOR_EACH_ORIGINAL_MSG_PREFIX = "FOR_EACH_";
     private static final String FOR_EACH_ORIGINAL_MESSAGE_ID = "FOR_EACH_ORIGINAL_MESSAGE_ID";
     private final Object lock = new Object();
-    private final Map<String, ForLoopAggregate> activeAggregates = Collections.synchronizedMap(new HashMap<>());
+    private final Map<String, ForEachAggregate> activeAggregates = Collections.synchronizedMap(new HashMap<>());
     private final String id;
     private SynapsePath collectionExpression = null;
     private Target target;
-    private long completionTimeoutMillis = 0;
     private boolean parallelExecution = true;
     private Integer statisticReportingIndex;
     private String contentType;
@@ -103,59 +101,11 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
         id = String.valueOf(new Random().nextLong());
     }
 
-    private static void addChildren(List list, OMElement element) {
-
-        for (Object item : list) {
-            if (item instanceof OMElement) {
-                element.addChild((OMElement) item);
-            }
-        }
-    }
-
-    private static List getMatchingElements(MessageContext messageContext, SynapsePath expression) {
-
-        Object o = expression.objectValueOf(messageContext);
-        if (o instanceof OMNode) {
-            List list = new ArrayList();
-            list.add(o);
-            return list;
-        } else if (o instanceof List) {
-            return (List) o;
-        } else {
-            return new ArrayList();
-        }
-    }
-
-    private static void enrichEnvelope(MessageContext messageContext, SynapsePath expression) {
-
-        OMElement enrichingElement;
-        List elementList = getMatchingElements(messageContext, expression);
-        if (EIPUtils.checkNotEmpty(elementList)) {
-            // attach at parent of the first result from the XPath, or to the SOAPBody
-            Object o = elementList.get(0);
-            if (o instanceof OMElement &&
-                    ((OMElement) o).getParent() != null &&
-                    ((OMElement) o).getParent() instanceof OMElement) {
-                enrichingElement = (OMElement) ((OMElement) o).getParent();
-                OMElement body = messageContext.getEnvelope().getBody();
-                if (!EIPUtils.isBody(body, enrichingElement)) {
-                    OMElement nonBodyElem = enrichingElement;
-                    enrichingElement = messageContext.getEnvelope().getBody();
-                    addChildren(elementList, enrichingElement);
-                    while (!EIPUtils.isBody(body, (OMElement) nonBodyElem.getParent())) {
-                        nonBodyElem = (OMElement) nonBodyElem.getParent();
-                    }
-                    nonBodyElem.detach();
-                }
-            }
-        }
-    }
-
     /**
-     * Check whether the message is a scatter message or not
+     * Check whether the message is a foreach message or not
      *
      * @param synCtx MessageContext
-     * @return true if the message is a scatter message
+     * @return true if the message is a foreach message
      */
     private static boolean isContinuationTriggeredFromMediatorWorker(MessageContext synCtx) {
 
@@ -172,7 +122,7 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
         SynapseLog synLog = getLog(synCtx);
 
         if (synLog.isTraceOrDebugEnabled()) {
-            synLog.traceOrDebug("Start : For Loop mediator");
+            synLog.traceOrDebug("Start : Foreach mediator v2");
 
             if (synLog.isTraceTraceEnabled()) {
                 synLog.traceTrace("Message : " + synCtx.getEnvelope());
@@ -185,8 +135,7 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
             String messageId = FOR_EACH_ORIGINAL_MSG_PREFIX + synCtx.getMessageID();
             MessageCache.getInstance().addMessageContext(messageId, clonedMessageContext);
             synCtx.setProperty(FOR_EACH_ORIGINAL_MESSAGE_ID, messageId);
-            synCtx.setProperty(id != null ? EIPConstants.EIP_SHARED_DATA_HOLDER + "." + id :
-                    EIPConstants.EIP_SHARED_DATA_HOLDER, new SharedDataHolder());
+            synCtx.setProperty(EIPConstants.EIP_SHARED_DATA_HOLDER + "." + id, new SharedDataHolder());
 
             Object collection = collectionExpression.objectValueOf(synCtx);
 
@@ -264,27 +213,6 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
                 ((Axis2MessageContext) synCtx).getAxis2MessageContext().isServerSide());
         return newCtx;
     }
-//
-//    private MessageContext getIteratedMessage(MessageContext synCtx, int msgNumber, int msgCount, OMNode omNode) throws AxisFault {
-//
-//        // clone the message context without cloning the SOAP envelope, for the mediation in iteration.
-//        MessageContext newCtx = MessageHelper.cloneMessageContext(synCtx, false, false);
-//
-//        SOAPEnvelope newEnvelope = createNewSoapEnvelope(synCtx.getEnvelope());
-//
-//        newCtx.setEnvelope(newEnvelope);
-//
-//        newCtx.setProperty(EIPConstants.AGGREGATE_CORRELATION + "." + id, synCtx.getMessageID());
-//        newCtx.setProperty(EIPConstants.MESSAGE_SEQUENCE + "." + id, msgNumber +
-//                EIPConstants.MESSAGE_SEQUENCE_DELEMITER + msgCount);
-//        // Set the SCATTER_MESSAGES property to the cloned message context which will be used by the MediatorWorker
-//        // to continue the mediation from the continuation state
-//        newCtx.setProperty(SynapseConstants.SCATTER_MESSAGES, true);
-//        // Set isServerSide property in the cloned message context
-//        ((Axis2MessageContext) newCtx).getAxis2MessageContext().setServerSide(
-//                ((Axis2MessageContext) synCtx).getAxis2MessageContext().isServerSide());
-//        return newCtx;
-//    }
 
     private SOAPEnvelope createNewSoapEnvelope(SOAPEnvelope envelope) {
 
@@ -334,7 +262,7 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
         SynapseLog synLog = getLog(synCtx);
 
         if (synLog.isTraceOrDebugEnabled()) {
-            synLog.traceOrDebug("Scatter Gather mediator : Mediating from ContinuationState");
+            synLog.traceOrDebug("Foreach mediator v2 : Mediating from ContinuationState");
         }
 
         boolean result;
@@ -381,9 +309,8 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
 
     private boolean aggregateMessages(MessageContext synCtx, SynapseLog synLog) {
 
-        ForLoopAggregate aggregate = null;
-        String correlationIdName = (id != null ? EIPConstants.AGGREGATE_CORRELATION + "." + id :
-                EIPConstants.AGGREGATE_CORRELATION);
+        ForEachAggregate aggregate = null;
+        String correlationIdName = EIPConstants.AGGREGATE_CORRELATION + "." + id;
 
         Object correlationID = synCtx.getProperty(correlationIdName);
         String correlation;
@@ -409,33 +336,10 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
                             break;
                         }
                     } else {
-                        if (synLog.isTraceOrDebugEnabled()) {
-                            synLog.traceOrDebug("Creating new Aggregator - " +
-                                    (completionTimeoutMillis > 0 ? "expires in : "
-                                            + (completionTimeoutMillis / 1000) + "secs" :
-                                            "without expiry time"));
-                        }
                         if (isAggregationCompleted(synCtx)) {
                             return false;
                         }
-                        aggregate = new ForLoopAggregate(synCtx.getEnvironment(), correlation, completionTimeoutMillis, this,
-                                synCtx.getFaultStack().peek());
-
-                        if (completionTimeoutMillis > 0) {
-                            synchronized (aggregate) {
-                                if (!aggregate.isCompleted()) {
-                                    try {
-                                        synCtx.getConfiguration().getSynapseTimer().
-                                                schedule(aggregate, completionTimeoutMillis);
-                                    } catch (IllegalStateException e) {
-                                        log.warn("Synapse timer already cancelled. Resetting Synapse timer");
-                                        synCtx.getConfiguration().setSynapseTimer(new Timer(true));
-                                        synCtx.getConfiguration().getSynapseTimer().
-                                                schedule(aggregate, completionTimeoutMillis);
-                                    }
-                                }
-                            }
-                        }
+                        aggregate = new ForEachAggregate(correlation, id);
                         aggregate.getLock();
                         activeAggregates.put(correlation, aggregate);
                     }
@@ -459,7 +363,7 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
             if (aggregate.isComplete(synLog)) {
                 synLog.traceOrDebug("Aggregation completed");
                 boolean onCompleteSeqResult = completeAggregate(aggregate);
-                synLog.traceOrDebug("End : Scatter Gather mediator");
+                synLog.traceOrDebug("End : Foreach mediator v2");
                 return onCompleteSeqResult;
             } else {
                 aggregate.releaseLock();
@@ -473,12 +377,10 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
 
     private boolean isAggregationCompleted(MessageContext synCtx) {
 
-        Object aggregateTimeoutHolderObj =
-                synCtx.getProperty(id != null ? EIPConstants.EIP_SHARED_DATA_HOLDER + "." + id :
-                        EIPConstants.EIP_SHARED_DATA_HOLDER);
+        Object aggregateHolderObj = synCtx.getProperty(EIPConstants.EIP_SHARED_DATA_HOLDER + "." + id);
 
-        if (aggregateTimeoutHolderObj != null) {
-            SharedDataHolder sharedDataHolder = (SharedDataHolder) aggregateTimeoutHolderObj;
+        if (aggregateHolderObj != null) {
+            SharedDataHolder sharedDataHolder = (SharedDataHolder) aggregateHolderObj;
             if (sharedDataHolder.isAggregationCompleted()) {
                 if (log.isDebugEnabled()) {
                     log.debug("Received a response for already completed Aggregate");
@@ -489,7 +391,7 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
         return false;
     }
 
-    public boolean completeAggregate(ForLoopAggregate aggregate) {
+    public boolean completeAggregate(ForEachAggregate aggregate) {
 
         boolean markedCompletedNow = false;
         boolean wasComplete = aggregate.isCompleted();
@@ -501,20 +403,14 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
             log.debug("Aggregation completed or timed out");
         }
 
-        // cancel the timer
         synchronized (this) {
             if (!aggregate.isCompleted()) {
-                aggregate.cancel();
                 aggregate.setCompleted(true);
-
                 MessageContext lastMessage = aggregate.getLastMessage();
                 if (lastMessage != null) {
-                    Object aggregateTimeoutHolderObj =
-                            lastMessage.getProperty(id != null ? EIPConstants.EIP_SHARED_DATA_HOLDER + "." + id :
-                                    EIPConstants.EIP_SHARED_DATA_HOLDER);
-
-                    if (aggregateTimeoutHolderObj != null) {
-                        SharedDataHolder sharedDataHolder = (SharedDataHolder) aggregateTimeoutHolderObj;
+                    Object aggregateHolderObj = lastMessage.getProperty(EIPConstants.EIP_SHARED_DATA_HOLDER + "." + id);
+                    if (aggregateHolderObj != null) {
+                        SharedDataHolder sharedDataHolder = (SharedDataHolder) aggregateHolderObj;
                         sharedDataHolder.markAggregationCompletion();
                     }
                 }
@@ -560,53 +456,73 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
         return result;
     }
 
-    private void setContentTypeHeader(Object resultValue, org.apache.axis2.context.MessageContext axis2MessageCtx) {
-
-        axis2MessageCtx.setProperty(Constants.Configuration.CONTENT_TYPE, resultValue);
-        Object o = axis2MessageCtx.getProperty(org.apache.axis2.context.MessageContext.TRANSPORT_HEADERS);
-        Map headers = (Map) o;
-        if (headers != null) {
-            headers.put(HTTP.CONTENT_TYPE, resultValue);
-        }
-    }
-
-    private void setAggregatedMessageAsVariable(MessageContext originalMessageContext, ForLoopAggregate aggregate) {
+    private void setAggregatedMessageAsVariable(MessageContext originalMessageContext, ForEachAggregate aggregate) {
 
         Object variable = originalMessageContext.getVariable(resultTarget);
-        for (MessageContext synCtx : aggregate.getMessages()) {
-            if (Objects.equals(contentType, JSON_TYPE)) {
-                if (variable instanceof JsonObject) {
-                    Object prop = synCtx.getProperty(EIPConstants.MESSAGE_SEQUENCE + "." + id);
-                    String[] msgSequence = prop.toString().split(EIPConstants.MESSAGE_SEQUENCE_DELEMITER);
-                    JsonElement jsonElement = null;
-                    try {
-                        Object result = new SynapseExpression("payload").objectValueOf(synCtx);
-                        if (result instanceof JsonElement) {
-                            jsonElement = (JsonElement) result;
-                        }
-                    } catch (JaxenException e) {
-                        log.warn("Error extracting the JSON payload for iteration : " + msgSequence[0]);
-                    }
-                    ((JsonElement) variable).getAsJsonObject().add(msgSequence[0], jsonElement);
-                } else {
-                    handleException(aggregate, "Error merging aggregation results to variable : " + resultTarget +
-                            " expected a JSON type variable but found " + variable.getClass().getName(), null, synCtx);
-                }
-            } else {
-//                    if (variable instanceof OMElement) {
-//                        List list = getMatchingElements(synCtx, aggregationExpression);
-//                        addChildren(list, (OMElement) variable);
-//                    } else {
-//                        handleException(aggregate, "Error merging aggregation results to variable : " + resultTarget +
-//                                " expected an OMElement type variable but found " + variable.getClass().getName(), null, synCtx);
-//                    }
-            }
-
+        if (variable == null) {
+            originalMessageContext.setVariable(resultTarget, createNewVariable(originalMessageContext, aggregate));
         }
-
+        if (Objects.equals(contentType, JSON_TYPE) && variable instanceof JsonObject) {
+            setJSONResultToVariable((JsonObject) variable, aggregate);
+        } else if (Objects.equals(contentType, XML_TYPE) && variable instanceof OMElement) {
+            setXMLResultToVariable((OMElement) variable, aggregate);
+        } else {
+            handleInvalidVariableType(variable, aggregate, originalMessageContext);
+        }
     }
 
-    private void updateOriginalPayload(MessageContext originalMessageContext, ForLoopAggregate aggregate) {
+    private void handleInvalidVariableType(Object variable, ForEachAggregate aggregate, MessageContext originalMessageContext) {
+
+        String expectedType = Objects.equals(contentType, JSON_TYPE) ? JsonObject.class.getName() : OMElement.class.getName();
+        String actualType = variable != null ? variable.getClass().getName() : "null";
+        handleException(aggregate, "Error assigning iteration results to variable: " + resultTarget +
+                " expected a " + expectedType + " but found " + actualType, originalMessageContext);
+    }
+
+    private Object createNewVariable(MessageContext originalMessageContext, ForEachAggregate aggregate) {
+
+        if (Objects.equals(contentType, JSON_TYPE)) {
+            return new JsonObject();
+        } else if (Objects.equals(contentType, XML_TYPE)) {
+            return OMAbstractFactory.getOMFactory().createOMElement(new QName(resultTarget));
+        } else {
+            handleException(aggregate, "Error assigning iteration results to variable : " + resultTarget +
+                    " unknown content type : " + contentType, originalMessageContext);
+            return null;
+        }
+    }
+
+    private void setJSONResultToVariable(JsonObject variable, ForEachAggregate aggregate) {
+
+        for (MessageContext synCtx : aggregate.getMessages()) {
+            Object prop = synCtx.getProperty(EIPConstants.MESSAGE_SEQUENCE + "." + id);
+            String[] msgSequence = prop.toString().split(EIPConstants.MESSAGE_SEQUENCE_DELEMITER);
+            JsonElement jsonElement = null;
+            try {
+                Object result = new SynapseExpression("payload").objectValueOf(synCtx);
+                if (result instanceof JsonElement) {
+                    jsonElement = (JsonElement) result;
+                }
+            } catch (JaxenException e) {
+                log.warn("Error extracting the JSON payload for iteration : " + msgSequence[0]);
+            }
+            variable.getAsJsonObject().add(msgSequence[0], jsonElement);
+        }
+    }
+
+    private void setXMLResultToVariable(OMElement variable, ForEachAggregate aggregate) {
+
+        OMFactory factory = OMAbstractFactory.getOMFactory();
+        for (MessageContext synCtx : aggregate.getMessages()) {
+            Object prop = synCtx.getProperty(EIPConstants.MESSAGE_SEQUENCE + "." + id);
+            String[] msgSequence = prop.toString().split(EIPConstants.MESSAGE_SEQUENCE_DELEMITER);
+            OMElement arrayElement = factory.createOMElement(new QName(msgSequence[0]));
+            arrayElement.addChild(synCtx.getEnvelope().getBody().getFirstElement());
+            variable.addChild(arrayElement);
+        }
+    }
+
+    private void updateOriginalPayload(MessageContext originalMessageContext, ForEachAggregate aggregate) {
 
         Object collection = this.collectionExpression.objectValueOf(originalMessageContext);
 
@@ -615,9 +531,9 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
         DocumentContext parsedJsonPayload = JsonPath.parse(jsonPayload);
 
         if (collection instanceof JsonArray) {
-            JsonArray jsonArray = (JsonArray) collection;
-            for (MessageContext synCtx : aggregate.getMessages()) {
-                if (Objects.equals(contentType, JSON_TYPE)) {
+            if (Objects.equals(contentType, JSON_TYPE)) {
+                JsonArray jsonArray = (JsonArray) collection;
+                for (MessageContext synCtx : aggregate.getMessages()) {
                     Object prop = synCtx.getProperty(EIPConstants.MESSAGE_SEQUENCE + "." + id);
                     String[] msgSequence = prop.toString().split(EIPConstants.MESSAGE_SEQUENCE_DELEMITER);
                     JsonElement jsonElement = null;
@@ -630,33 +546,48 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
                         log.warn("Error extracting the JSON payload for iteration : " + msgSequence[0]);
                     }
                     jsonArray.set(Integer.parseInt(msgSequence[0]), jsonElement);
+                }
+                JsonPath jsonPath = getJsonPathFromExpression(this.collectionExpression.getExpression());
+                JsonElement jsonPayloadElement;
+                if (isWholeContent(jsonPath)) {
+                    jsonPayloadElement = jsonArray;
                 } else {
-//                    if (variable instanceof OMElement) {
-//                        List list = getMatchingElements(synCtx, aggregationExpression);
-//                        addChildren(list, (OMElement) variable);
-//                    } else {
-//                        handleException(aggregate, "Error merging aggregation results to variable : " + resultTarget +
-//                                " expected an OMElement type variable but found " + variable.getClass().getName(), null, synCtx);
-//                    }
+                    jsonPayloadElement = parsedJsonPayload.set(jsonPath, jsonArray).json();
                 }
-            }
-            JsonPath jsonPath = getJsonPathFromExpression(this.collectionExpression.getExpression());
-            JsonElement jsonPayloadElement;
-            if (isWholeContent(jsonPath)) {
-                jsonPayloadElement = jsonArray;
+                if (isCollectionReferencedByVariable(this.collectionExpression)) {
+                    String variableName = getVariableName(this.collectionExpression);
+                    originalMessageContext.setVariable(variableName, jsonPayloadElement);
+                } else {
+                    try {
+                        JsonUtil.getNewJsonPayload(((Axis2MessageContext) originalMessageContext).getAxis2MessageContext(),
+                                jsonPayloadElement.toString(), true, true);
+                    } catch (AxisFault af) {
+                        handleException("Error updating the json stream after foreach transformation", af, originalMessageContext);
+                    }
+                }
             } else {
-                jsonPayloadElement = parsedJsonPayload.set(jsonPath, jsonArray).json();
+                handleException(aggregate, "Error updating the original JSON array. Iteration result is not a JSON payload", originalMessageContext);
             }
-            if (isCollectionReferencedByVariable(this.collectionExpression)) {
-                String variableName = getVariableName(this.collectionExpression);
-                originalMessageContext.setVariable(variableName, jsonPayloadElement);
-            } else {
+        } else if (collection instanceof List) {
+            if (Objects.equals(contentType, XML_TYPE)) {
                 try {
-                    JsonUtil.getNewJsonPayload(((Axis2MessageContext) originalMessageContext).getAxis2MessageContext(),
-                            jsonPayloadElement.toString(), true, true);
-                } catch (AxisFault af) {
-                    handleException("Error updating the json stream after foreach transformation", af, originalMessageContext);
+                    SOAPEnvelope processingEnvelope = originalMessageContext.getEnvelope();
+                    // Extract the xpath value inside xpath() function from the expression
+                    String xpath = this.collectionExpression.getExpression().substring(7, this.collectionExpression.getExpression().length() - 2);
+                    SynapseXPath synapseXPath = new SynapseXPath(xpath);
+                    Object targetObj = synapseXPath.selectSingleNode(processingEnvelope);
+                    for (MessageContext synCtx : aggregate.getMessages()) {
+                        Object prop = synCtx.getProperty(EIPConstants.MESSAGE_SEQUENCE + "." + id);
+                        String[] msgSequence = prop.toString().split(EIPConstants.MESSAGE_SEQUENCE_DELEMITER);
+                        if (targetObj instanceof OMElement) {
+                            ((OMElement) targetObj).getParent().addChild(synCtx.getEnvelope().getBody().getFirstElement());
+                        }
+                    }
+                } catch (JaxenException e) {
+                    handleException(aggregate, "Error updating the original XML array. Error evaluating the xpath expression", originalMessageContext);
                 }
+            } else {
+                handleException(aggregate, "Error updating the original XML array. Iteration result is not an XML payload", originalMessageContext);
             }
         }
     }
@@ -694,25 +625,11 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
         return true;
     }
 
-    private void handleException(ForLoopAggregate aggregate, String msg, Exception exception, MessageContext msgContext) {
+    private void handleException(ForEachAggregate aggregate, String msg, MessageContext msgContext) {
 
         aggregate.clear();
-        activeAggregates.clear();
-        if (exception != null) {
-            super.handleException(msg, exception, msgContext);
-        } else {
-            super.handleException(msg, msgContext);
-        }
-    }
-
-    public long getCompletionTimeoutMillis() {
-
-        return completionTimeoutMillis;
-    }
-
-    public void setCompletionTimeoutMillis(long completionTimeoutMillis) {
-
-        this.completionTimeoutMillis = completionTimeoutMillis;
+        activeAggregates.remove(aggregate.getCorrelation());
+        super.handleException(msg, msgContext);
     }
 
     public String getContentType() {
@@ -783,7 +700,6 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
         } else if (jsonPath.startsWith("var.")) {
             // Remove the "var." prefix and variable name and replace it with "$" for JSON path
             jsonPath = expression.replaceAll("var\\.\\w+\\.(\\w+)", "\\$.$1").replaceAll("var\\.\\w+", "\\$");
-            ;
         }
         return JsonPath.compile(jsonPath);
     }
