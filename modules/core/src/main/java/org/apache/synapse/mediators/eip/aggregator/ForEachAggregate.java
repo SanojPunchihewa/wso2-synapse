@@ -125,10 +125,14 @@ public class ForEachAggregate {
 
     public synchronized boolean getLock() {
 
-        return !locked;
+        if (!locked) {
+            locked = true;
+            return true;
+        }
+        return false;
     }
 
-    public void releaseLock() {
+    public synchronized void releaseLock() {
 
         locked = false;
     }
