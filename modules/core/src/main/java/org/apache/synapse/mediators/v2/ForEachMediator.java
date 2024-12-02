@@ -24,6 +24,7 @@ import com.google.gson.JsonObject;
 import com.jayway.jsonpath.DocumentContext;
 import com.jayway.jsonpath.JsonPath;
 import org.apache.axiom.om.OMAbstractFactory;
+import org.apache.axiom.om.OMContainer;
 import org.apache.axiom.om.OMElement;
 import org.apache.axiom.om.OMFactory;
 import org.apache.axiom.om.OMNode;
@@ -54,7 +55,6 @@ import org.apache.synapse.continuation.ContinuationStackManager;
 import org.apache.synapse.continuation.SeqContinuationState;
 import org.apache.synapse.core.SynapseEnvironment;
 import org.apache.synapse.core.axis2.Axis2MessageContext;
-import org.apache.synapse.endpoints.auth.oauth.MessageCache;
 import org.apache.synapse.mediators.AbstractMediator;
 import org.apache.synapse.mediators.FlowContinuableMediator;
 import org.apache.synapse.mediators.base.SequenceMediator;
@@ -69,6 +69,7 @@ import org.apache.synapse.util.xpath.SynapseXPath;
 import org.jaxen.JaxenException;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -82,8 +83,6 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
 
     public static final String JSON_TYPE = "JSON";
     public static final String XML_TYPE = "XML";
-    private static final String FOR_EACH_ORIGINAL_MSG_PREFIX = "FOR_EACH_";
-    private static final String FOR_EACH_ORIGINAL_MESSAGE_ID = "FOR_EACH_ORIGINAL_MESSAGE_ID";
     private final Object lock = new Object();
     private final Map<String, ForEachAggregate> activeAggregates = Collections.synchronizedMap(new HashMap<>());
     private final String id;
@@ -132,10 +131,7 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
         try {
             // Clone the original MessageContext and save it to continue the flow
             MessageContext clonedMessageContext = MessageHelper.cloneMessageContext(synCtx);
-            String messageId = FOR_EACH_ORIGINAL_MSG_PREFIX + synCtx.getMessageID();
-            MessageCache.getInstance().addMessageContext(messageId, clonedMessageContext);
-            synCtx.setProperty(FOR_EACH_ORIGINAL_MESSAGE_ID, messageId);
-            synCtx.setProperty(EIPConstants.EIP_SHARED_DATA_HOLDER + "." + id, new SharedDataHolder());
+            synCtx.setProperty(EIPConstants.EIP_SHARED_DATA_HOLDER + "." + id, new SharedDataHolder(clonedMessageContext));
 
             Object collection = collectionExpression.objectValueOf(synCtx);
 
@@ -174,8 +170,8 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
             } else {
                 handleException("Expression " + collectionExpression + " did not resolve to a valid array", synCtx);
             }
-        } catch (Exception e) {
-            handleException("Error executing For Loop mediator", e, synCtx);
+        } catch (AxisFault e) {
+            handleException("Error executing Foreach mediator V2", e, synCtx);
         }
 
         OperationContext opCtx
@@ -391,7 +387,7 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
         return false;
     }
 
-    public boolean completeAggregate(ForEachAggregate aggregate) {
+    private boolean completeAggregate(ForEachAggregate aggregate) {
 
         boolean markedCompletedNow = false;
         boolean wasComplete = aggregate.isCompleted();
@@ -422,45 +418,63 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
             return false;
         }
 
-        MessageContext originalMessageContext = MessageCache.getInstance().removeMessageContext(
-                (String) aggregate.getLastMessage().getProperty(FOR_EACH_ORIGINAL_MESSAGE_ID));
+        MessageContext originalMessageContext = getOriginalMessageContext(aggregate);
 
-        if (updateOriginalContent()) {
-            updateOriginalPayload(originalMessageContext, aggregate);
-        } else {
-            setAggregatedMessageAsVariable(originalMessageContext, aggregate);
-        }
-        StatisticDataCollectionHelper.collectAggregatedParents(aggregate.getMessages(), originalMessageContext);
-        aggregate.clear();
-        activeAggregates.remove(aggregate.getCorrelation());
-        // Update the continuation state to current mediator position as we are using the original message context
-        ContinuationStackManager.updateSeqContinuationState(originalMessageContext, getMediatorPosition());
-        SeqContinuationState seqContinuationState = (SeqContinuationState) ContinuationStackManager.peakContinuationStateStack(originalMessageContext);
-        boolean result = false;
+        if (originalMessageContext != null) {
+            if (updateOriginalContent()) {
+                updateOriginalPayload(originalMessageContext, aggregate);
+            } else {
+                setAggregatedMessageAsVariable(originalMessageContext, aggregate);
+            }
+            StatisticDataCollectionHelper.collectAggregatedParents(aggregate.getMessages(), originalMessageContext);
+            aggregate.clear();
+            activeAggregates.remove(aggregate.getCorrelation());
+            // Update the continuation state to current mediator position as we are using the original message context
+            ContinuationStackManager.updateSeqContinuationState(originalMessageContext, getMediatorPosition());
+            SeqContinuationState seqContinuationState = (SeqContinuationState) ContinuationStackManager.peakContinuationStateStack(originalMessageContext);
+            boolean result = false;
 
-        // Set CONTINUE_STATISTICS_FLOW to avoid mark event collection as finished before the aggregation is completed
-        originalMessageContext.setProperty(StatisticsConstants.CONTINUE_STATISTICS_FLOW, true);
-        if (RuntimeStatisticCollector.isStatisticsEnabled()) {
-            CloseEventCollector.closeEntryEvent(originalMessageContext, getMediatorName(), ComponentType.MEDIATOR,
-                    statisticReportingIndex, isContentAltering());
-        }
-
-        if (seqContinuationState != null) {
-            SequenceMediator sequenceMediator = ContinuationStackManager.retrieveSequence(originalMessageContext, seqContinuationState);
-            result = sequenceMediator.mediate(originalMessageContext, seqContinuationState);
+            // Set CONTINUE_STATISTICS_FLOW to avoid mark event collection as finished before the aggregation is completed
+            originalMessageContext.setProperty(StatisticsConstants.CONTINUE_STATISTICS_FLOW, true);
             if (RuntimeStatisticCollector.isStatisticsEnabled()) {
-                sequenceMediator.reportCloseStatistics(originalMessageContext, null);
+                CloseEventCollector.closeEntryEvent(originalMessageContext, getMediatorName(), ComponentType.MEDIATOR,
+                        statisticReportingIndex, isContentAltering());
+            }
+
+            if (seqContinuationState != null) {
+                SequenceMediator sequenceMediator = ContinuationStackManager.retrieveSequence(originalMessageContext, seqContinuationState);
+                result = sequenceMediator.mediate(originalMessageContext, seqContinuationState);
+                if (RuntimeStatisticCollector.isStatisticsEnabled()) {
+                    sequenceMediator.reportCloseStatistics(originalMessageContext, null);
+                }
+            }
+            CloseEventCollector.closeEventsAfterScatterGather(originalMessageContext);
+            return result;
+        } else {
+            handleException(aggregate, "Error retrieving the original message context", aggregate.getLastMessage());
+            return false;
+        }
+    }
+
+    private MessageContext getOriginalMessageContext(ForEachAggregate aggregate) {
+
+        MessageContext lastMessage = aggregate.getLastMessage();
+        if (lastMessage != null) {
+            Object aggregateHolderObj = lastMessage.getProperty(EIPConstants.EIP_SHARED_DATA_HOLDER + "." + id);
+            if (aggregateHolderObj != null) {
+                SharedDataHolder sharedDataHolder = (SharedDataHolder) aggregateHolderObj;
+                return sharedDataHolder.getSynCtx();
             }
         }
-        CloseEventCollector.closeEventsAfterScatterGather(originalMessageContext);
-        return result;
+        return null;
     }
 
     private void setAggregatedMessageAsVariable(MessageContext originalMessageContext, ForEachAggregate aggregate) {
 
         Object variable = originalMessageContext.getVariable(resultTarget);
         if (variable == null) {
-            originalMessageContext.setVariable(resultTarget, createNewVariable(originalMessageContext, aggregate));
+            variable = createNewVariable(originalMessageContext, aggregate);
+            originalMessageContext.setVariable(resultTarget, variable);
         }
         if (Objects.equals(contentType, JSON_TYPE) && variable instanceof JsonObject) {
             setJSONResultToVariable((JsonObject) variable, aggregate);
@@ -571,23 +585,53 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
         } else if (collection instanceof List) {
             if (Objects.equals(contentType, XML_TYPE)) {
                 try {
-                    SOAPEnvelope processingEnvelope = originalMessageContext.getEnvelope();
-                    // Extract the xpath value inside xpath() function from the expression
-                    String xpath = this.collectionExpression.getExpression().substring(7, this.collectionExpression.getExpression().length() - 2);
-                    SynapseXPath synapseXPath = new SynapseXPath(xpath);
-                    Object targetObj = synapseXPath.selectSingleNode(processingEnvelope);
+                    List<OMNode> results = new ArrayList<>(Collections.nCopies(aggregate.getMessages().size(), null));
                     for (MessageContext synCtx : aggregate.getMessages()) {
                         Object prop = synCtx.getProperty(EIPConstants.MESSAGE_SEQUENCE + "." + id);
                         String[] msgSequence = prop.toString().split(EIPConstants.MESSAGE_SEQUENCE_DELEMITER);
-                        if (targetObj instanceof OMElement) {
-                            ((OMElement) targetObj).getParent().addChild(synCtx.getEnvelope().getBody().getFirstElement());
-                        }
+                        results.set(Integer.parseInt(msgSequence[0]), synCtx.getEnvelope().getBody().getFirstElement());
+                    }
+
+                    if (isCollectionReferencedByVariable(this.collectionExpression)) {
+                        String variableName = getVariableName(this.collectionExpression);
+                        updateXMLCollection(originalMessageContext.getVariable(variableName), results);
+                    } else {
+                        // Extract the xpath value inside xpath() function from the expression
+                        String xpath = this.collectionExpression.getExpression().substring(7, this.collectionExpression.getExpression().length() - 2);
+                        SynapseXPath synapseXPath = new SynapseXPath(xpath);
+                        Object oldCollectionNodes = synapseXPath.evaluate(originalMessageContext);
+                        updateXMLCollection(oldCollectionNodes, results);
                     }
                 } catch (JaxenException e) {
-                    handleException(aggregate, "Error updating the original XML array. Error evaluating the xpath expression", originalMessageContext);
+                    handleException(aggregate, "Error updating the original XML array", originalMessageContext);
                 }
             } else {
                 handleException(aggregate, "Error updating the original XML array. Iteration result is not an XML payload", originalMessageContext);
+            }
+        }
+    }
+
+    private void updateXMLCollection(Object oldCollectionNodes, List<OMNode> results) {
+
+        OMContainer parent = null;
+        // This is an XML collection. Hence detach the elements from the original collection and attach the new elements
+        if (oldCollectionNodes instanceof OMNode) {
+            parent = ((OMNode) oldCollectionNodes).getParent();
+            ((OMNode) oldCollectionNodes).detach();
+        } else if (oldCollectionNodes instanceof List) {
+            List oList = (List) oldCollectionNodes;
+            if (!oList.isEmpty()) {
+                parent = (((OMNode) oList.get(0)).getParent());
+            }
+            for (Object elem : oList) {
+                if (elem instanceof OMNode) {
+                    ((OMNode) elem).detach();
+                }
+            }
+        }
+        for (OMNode result : results) {
+            if (parent != null) {
+                parent.addChild(result);
             }
         }
     }
