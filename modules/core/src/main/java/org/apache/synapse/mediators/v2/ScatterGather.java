@@ -88,7 +88,7 @@ public class ScatterGather extends AbstractMediator implements ManagedLifecycle,
     public static final String XML_TYPE = "XML";
     private final Object lock = new Object();
     private final Map<String, Aggregate> activeAggregates = Collections.synchronizedMap(new HashMap<>());
-    private String id;
+    private final String id;
     private List<Target> targets = new ArrayList<>();
     private long completionTimeoutMillis = 0;
     private Value maxMessagesToComplete;
@@ -99,7 +99,6 @@ public class ScatterGather extends AbstractMediator implements ManagedLifecycle,
     private Integer statisticReportingIndex;
     private String contentType;
     private String resultTarget;
-    private MessageContext originalMessageContext;
     private SynapseEnvironment synapseEnv;
 
     public ScatterGather() {
@@ -137,6 +136,7 @@ public class ScatterGather extends AbstractMediator implements ManagedLifecycle,
             }
         }
 
+        MessageContext originalMessageContext = null;
         if (!isTargetBody()) {
             try {
                 originalMessageContext = MessageHelper.cloneMessageContext(synCtx);
@@ -145,8 +145,7 @@ public class ScatterGather extends AbstractMediator implements ManagedLifecycle,
             }
         }
 
-        synCtx.setProperty(id != null ? EIPConstants.EIP_SHARED_DATA_HOLDER + "." + id :
-                EIPConstants.EIP_SHARED_DATA_HOLDER, new SharedDataHolder());
+        synCtx.setProperty(EIPConstants.EIP_SHARED_DATA_HOLDER + "." + id, new SharedDataHolder(originalMessageContext));
         Iterator<Target> iter = targets.iterator();
         int i = 0;
         while (iter.hasNext()) {
@@ -215,14 +214,9 @@ public class ScatterGather extends AbstractMediator implements ManagedLifecycle,
             // Set the SCATTER_MESSAGES property to the cloned message context which will be used by the MediatorWorker
             // to continue the mediation from the continuation state
             newCtx.setProperty(SynapseConstants.SCATTER_MESSAGES, true);
-            if (id != null) {
-                newCtx.setProperty(EIPConstants.AGGREGATE_CORRELATION + "." + id, synCtx.getMessageID());
-                newCtx.setProperty(EIPConstants.MESSAGE_SEQUENCE + "." + id, messageSequence +
-                        EIPConstants.MESSAGE_SEQUENCE_DELEMITER + messageCount);
-            } else {
-                newCtx.setProperty(EIPConstants.MESSAGE_SEQUENCE, messageSequence +
-                        EIPConstants.MESSAGE_SEQUENCE_DELEMITER + messageCount);
-            }
+            newCtx.setProperty(EIPConstants.AGGREGATE_CORRELATION + "." + id, synCtx.getMessageID());
+            newCtx.setProperty(EIPConstants.MESSAGE_SEQUENCE + "." + id, messageSequence +
+                    EIPConstants.MESSAGE_SEQUENCE_DELEMITER + messageCount);
         } catch (AxisFault axisFault) {
             handleException("Error cloning the message context", axisFault, synCtx);
         }
@@ -311,8 +305,7 @@ public class ScatterGather extends AbstractMediator implements ManagedLifecycle,
     private boolean aggregateMessages(MessageContext synCtx, SynapseLog synLog) {
 
         Aggregate aggregate = null;
-        String correlationIdName = (id != null ? EIPConstants.AGGREGATE_CORRELATION + "." + id :
-                EIPConstants.AGGREGATE_CORRELATION);
+        String correlationIdName = EIPConstants.AGGREGATE_CORRELATION + "." + id;
 
         Object correlationID = synCtx.getProperty(correlationIdName);
         String correlation;
@@ -481,9 +474,7 @@ public class ScatterGather extends AbstractMediator implements ManagedLifecycle,
 
     private boolean isAggregationCompleted(MessageContext synCtx) {
 
-        Object aggregateTimeoutHolderObj =
-                synCtx.getProperty(id != null ? EIPConstants.EIP_SHARED_DATA_HOLDER + "." + id :
-                        EIPConstants.EIP_SHARED_DATA_HOLDER);
+        Object aggregateTimeoutHolderObj = synCtx.getProperty(EIPConstants.EIP_SHARED_DATA_HOLDER + "." + id);
 
         if (aggregateTimeoutHolderObj != null) {
             SharedDataHolder sharedDataHolder = (SharedDataHolder) aggregateTimeoutHolderObj;
@@ -568,32 +559,59 @@ public class ScatterGather extends AbstractMediator implements ManagedLifecycle,
             CloseEventCollector.closeEventsAfterScatterGather(newSynCtx);
             return result;
         } else {
-            setAggregatedMessageAsVariable(originalMessageContext, aggregate);
+            MessageContext originalMessageContext = getOriginalMessageContext(aggregate);
+            if (originalMessageContext != null) {
+                setAggregatedMessageAsVariable(originalMessageContext, aggregate);
 
-            aggregate.clear();
-            activeAggregates.remove(aggregate.getCorrelation());
-            // Update the continuation state to current mediator position as we are using the original message context
-            ContinuationStackManager.updateSeqContinuationState(originalMessageContext, getMediatorPosition());
-            SeqContinuationState seqContinuationState = (SeqContinuationState) ContinuationStackManager.peakContinuationStateStack(originalMessageContext);
-            boolean result = false;
+                aggregate.clear();
+                activeAggregates.remove(aggregate.getCorrelation());
+                // Update the continuation state to current mediator position as we are using the original message context
+                ContinuationStackManager.updateSeqContinuationState(originalMessageContext, getMediatorPosition());
+                SeqContinuationState seqContinuationState =
+                        (SeqContinuationState) ContinuationStackManager.peakContinuationStateStack(originalMessageContext);
+                boolean result = false;
 
-            // Set CONTINUE_STATISTICS_FLOW to avoid mark event collection as finished before the aggregation is completed
-            originalMessageContext.setProperty(StatisticsConstants.CONTINUE_STATISTICS_FLOW, true);
-            if (RuntimeStatisticCollector.isStatisticsEnabled()) {
-                CloseEventCollector.closeEntryEvent(originalMessageContext, getMediatorName(), ComponentType.MEDIATOR,
-                        statisticReportingIndex, isContentAltering());
-            }
-
-            if (seqContinuationState != null) {
-                SequenceMediator sequenceMediator = ContinuationStackManager.retrieveSequence(originalMessageContext, seqContinuationState);
-                result = sequenceMediator.mediate(originalMessageContext, seqContinuationState);
+                // Set CONTINUE_STATISTICS_FLOW to avoid mark event collection as finished before the aggregation is completed
+                originalMessageContext.setProperty(StatisticsConstants.CONTINUE_STATISTICS_FLOW, true);
                 if (RuntimeStatisticCollector.isStatisticsEnabled()) {
-                    sequenceMediator.reportCloseStatistics(originalMessageContext, null);
+                    CloseEventCollector.closeEntryEvent(originalMessageContext, getMediatorName(), ComponentType.MEDIATOR,
+                            statisticReportingIndex, isContentAltering());
                 }
+
+                if (seqContinuationState != null) {
+                    SequenceMediator sequenceMediator =
+                            ContinuationStackManager.retrieveSequence(originalMessageContext, seqContinuationState);
+                    result = sequenceMediator.mediate(originalMessageContext, seqContinuationState);
+                    if (RuntimeStatisticCollector.isStatisticsEnabled()) {
+                        sequenceMediator.reportCloseStatistics(originalMessageContext, null);
+                    }
+                }
+                CloseEventCollector.closeEventsAfterScatterGather(originalMessageContext);
+                return result;
+            } else {
+                handleException(aggregate, "Error retrieving the original message context", null, aggregate.getLastMessage());
+                return false;
             }
-            CloseEventCollector.closeEventsAfterScatterGather(originalMessageContext);
-            return result;
         }
+    }
+
+    /**
+     * Return the original message context using the SharedDataHolder.
+     *
+     * @param aggregate Aggregate object
+     * @return original message context
+     */
+    private MessageContext getOriginalMessageContext(Aggregate aggregate) {
+
+        MessageContext lastMessage = aggregate.getLastMessage();
+        if (lastMessage != null) {
+            Object aggregateHolderObj = lastMessage.getProperty(EIPConstants.EIP_SHARED_DATA_HOLDER + "." + id);
+            if (aggregateHolderObj != null) {
+                SharedDataHolder sharedDataHolder = (SharedDataHolder) aggregateHolderObj;
+                return sharedDataHolder.getSynCtx();
+            }
+        }
+        return null;
     }
 
     private void setContentType(MessageContext synCtx) {
@@ -613,7 +631,7 @@ public class ScatterGather extends AbstractMediator implements ManagedLifecycle,
 
     private void setContentTypeHeader(Object resultValue, org.apache.axis2.context.MessageContext axis2MessageCtx) {
 
-        axis2MessageCtx.setProperty(org.apache.axis2.Constants.Configuration.CONTENT_TYPE, resultValue);
+        axis2MessageCtx.setProperty(Constants.Configuration.CONTENT_TYPE, resultValue);
         Object o = axis2MessageCtx.getProperty(org.apache.axis2.context.MessageContext.TRANSPORT_HEADERS);
         Map headers = (Map) o;
         if (headers != null) {
@@ -788,7 +806,6 @@ public class ScatterGather extends AbstractMediator implements ManagedLifecycle,
     public void setCorrelateExpression(SynapsePath correlateExpression) {
 
         this.correlateExpression = correlateExpression;
-        this.id = null;
     }
 
     public long getCompletionTimeoutMillis() {
@@ -873,7 +890,7 @@ public class ScatterGather extends AbstractMediator implements ManagedLifecycle,
     private void handleException(Aggregate aggregate, String msg, Exception exception, MessageContext msgContext) {
 
         aggregate.clear();
-        activeAggregates.clear();
+        activeAggregates.remove(aggregate.getCorrelation());
         if (exception != null) {
             super.handleException(msg, exception, msgContext);
         } else {
