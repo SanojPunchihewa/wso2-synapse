@@ -74,7 +74,7 @@ public class ForEachAggregate {
                 MessageContext mc = messages.get(0);
                 Object prop = mc.getProperty(EIPConstants.MESSAGE_SEQUENCE + "." + forLoopMediatorId);
 
-                if (prop != null && prop instanceof String) {
+                if (prop instanceof String) {
                     String[] msgSequence = prop.toString().split(
                             EIPConstants.MESSAGE_SEQUENCE_DELEMITER);
                     int total = Integer.parseInt(msgSequence[1]);
@@ -105,7 +105,7 @@ public class ForEachAggregate {
 
     public synchronized List<MessageContext> getMessages() {
 
-        return new ArrayList<MessageContext>(messages);
+        return new ArrayList<>(messages);
     }
 
     public void setMessages(List<MessageContext> messages) {
