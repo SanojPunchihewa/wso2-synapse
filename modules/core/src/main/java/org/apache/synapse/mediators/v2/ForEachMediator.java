@@ -519,6 +519,7 @@ public class ForEachMediator extends AbstractMediator implements ManagedLifecycl
             } catch (JaxenException e) {
                 log.warn("Error extracting the JSON payload for iteration : " + msgSequence[0]);
             }
+            // initialize fixed array and fill
             variable.getAsJsonObject().add(msgSequence[0], jsonElement);
         }
     }

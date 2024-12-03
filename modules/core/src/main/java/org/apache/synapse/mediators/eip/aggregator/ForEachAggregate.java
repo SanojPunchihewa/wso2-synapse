@@ -125,6 +125,7 @@ public class ForEachAggregate {
 
     public synchronized boolean getLock() {
 
+        // chnage tp lock object
         if (!locked) {
             locked = true;
             return true;
