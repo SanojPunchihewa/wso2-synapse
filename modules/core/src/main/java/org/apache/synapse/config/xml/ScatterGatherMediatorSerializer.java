@@ -51,7 +51,7 @@ public class ScatterGatherMediatorSerializer extends AbstractMediatorSerializer 
         OMElement aggregationElement = fac.createOMElement("aggregation", synNS);
 
         SynapsePathSerializer.serializePath(
-                scatterGatherMediator.getAggregationExpression(), aggregationElement, "value");
+                scatterGatherMediator.getAggregationExpression(), aggregationElement, "expression");
 
         if (scatterGatherMediator.getCorrelateExpression() != null) {
             SynapsePathSerializer.serializePath(
