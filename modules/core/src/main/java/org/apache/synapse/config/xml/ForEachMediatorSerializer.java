@@ -22,6 +22,7 @@ package org.apache.synapse.config.xml;
 import org.apache.axiom.om.OMElement;
 import org.apache.synapse.Mediator;
 import org.apache.synapse.mediators.builtin.ForEachMediator;
+import org.apache.synapse.mediators.v2.ForEachMediatorV2;
 
 /**
  * <p>Serialize for each mediator as below : </p>
@@ -72,11 +73,11 @@ public class ForEachMediatorSerializer extends AbstractMediatorSerializer {
             serializeComments(forEachElem, forEachMed.getCommentsList());
 
             return forEachElem;
-        } else if (m instanceof org.apache.synapse.mediators.v2.ForEachMediator) {
+        } else if (m instanceof ForEachMediatorV2) {
             OMElement forEachElem = fac.createOMElement("foreach", synNS);
             saveTracingState(forEachElem, m);
 
-            org.apache.synapse.mediators.v2.ForEachMediator forEachMediatorV2 = (org.apache.synapse.mediators.v2.ForEachMediator) m;
+            ForEachMediatorV2 forEachMediatorV2 = (ForEachMediatorV2) m;
 
             if (forEachMediatorV2.getCollectionExpression() != null) {
                 SynapsePathSerializer.serializePath(forEachMediatorV2.getCollectionExpression(),
@@ -89,9 +90,9 @@ public class ForEachMediatorSerializer extends AbstractMediatorSerializer {
             if (forEachMediatorV2.getResultTarget() != null) {
                 forEachElem.addAttribute(fac.createOMAttribute(
                         "result-target", nullNS, forEachMediatorV2.getResultTarget()));
+                forEachElem.addAttribute(fac.createOMAttribute(
+                        "result-type", nullNS, forEachMediatorV2.getContentType()));
             }
-            forEachElem.addAttribute(fac.createOMAttribute(
-                    "content-type", nullNS, forEachMediatorV2.getContentType()));
             if (forEachMediatorV2.getCounterVariable() != null) {
                 forEachElem.addAttribute(fac.createOMAttribute(
                         "counter-variable", nullNS, forEachMediatorV2.getCounterVariable()));

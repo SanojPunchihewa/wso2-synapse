@@ -29,6 +29,7 @@ import org.apache.synapse.mediators.builtin.CalloutMediator;
 import org.apache.synapse.mediators.builtin.ForEachMediator;
 import org.apache.synapse.mediators.builtin.SendMediator;
 import org.apache.synapse.mediators.eip.Target;
+import org.apache.synapse.mediators.v2.ForEachMediatorV2;
 import org.jaxen.JaxenException;
 
 import javax.xml.namespace.QName;
@@ -59,12 +60,11 @@ public class ForEachMediatorFactory extends AbstractMediatorFactory {
     private static final QName CONTINUE_IN_FAULT_Q
             = new QName(XMLConfigConstants.NULL_NAMESPACE, "continueLoopOnFailure");
 
-    private static final QName VERSION_Q = new QName("version");
     private static final QName ATT_COLLECTION = new QName("collection");
     private static final QName SEQUENCE_Q = new QName(XMLConfigConstants.SYNAPSE_NAMESPACE, "sequence");
     private static final QName PARALLEL_EXEC_Q = new QName("parallel-execution");
     private static final QName RESULT_TARGET_Q = new QName("result-target");
-    private static final QName CONTENT_TYPE_Q = new QName("content-type");
+    private static final QName RESULT_TYPE_Q = new QName("result-type");
     private static final QName ATT_COUNTER_VARIABLE = new QName("counter-variable");
 
     public QName getTagQName() {
@@ -75,9 +75,8 @@ public class ForEachMediatorFactory extends AbstractMediatorFactory {
     protected Mediator createSpecificMediator(OMElement elem,
                                               Properties properties) {
 
-        OMAttribute versionAttr = elem.getAttribute(VERSION_Q);
-        if (versionAttr != null && StringUtils.isNotBlank(versionAttr.getAttributeValue()) &&
-                "v2".equals(versionAttr.getAttributeValue())) {
+        OMAttribute collectionAttr = elem.getAttribute(ATT_COLLECTION);
+        if (collectionAttr != null && StringUtils.isNotBlank(collectionAttr.getAttributeValue())) {
             return createForEachMediatorV2(elem, properties);
         }
 
@@ -147,7 +146,7 @@ public class ForEachMediatorFactory extends AbstractMediatorFactory {
 
         boolean asynchronousExe = true;
 
-        org.apache.synapse.mediators.v2.ForEachMediator mediator = new org.apache.synapse.mediators.v2.ForEachMediator();
+        ForEachMediatorV2 mediator = new ForEachMediatorV2();
         processAuditStatus(mediator, elem);
 
         OMAttribute parallelExecAttr = elem.getAttribute(PARALLEL_EXEC_Q);
@@ -156,22 +155,21 @@ public class ForEachMediatorFactory extends AbstractMediatorFactory {
         }
         mediator.setParallelExecution(asynchronousExe);
 
-        OMAttribute contentTypeAttr = elem.getAttribute(CONTENT_TYPE_Q);
-        if (contentTypeAttr == null || StringUtils.isBlank(contentTypeAttr.getAttributeValue())) {
-            handleException("The 'content-type' attribute is required for the configuration of a Foreach mediator");
-        } else {
-            if ("JSON".equals(contentTypeAttr.getAttributeValue())) {
-                mediator.setContentType(org.apache.synapse.mediators.v2.ForEachMediator.JSON_TYPE);
-            } else if ("XML".equals(contentTypeAttr.getAttributeValue())) {
-                mediator.setContentType(org.apache.synapse.mediators.v2.ForEachMediator.XML_TYPE);
-            } else {
-                handleException("The 'content-type' attribute should be either 'JSON' or 'XML'");
-            }
-        }
-
         OMAttribute resultTargetAttr = elem.getAttribute(RESULT_TARGET_Q);
         if (resultTargetAttr != null && StringUtils.isNotBlank(resultTargetAttr.getAttributeValue())) {
-            mediator.setResultTarget(resultTargetAttr.getAttributeValue());
+            OMAttribute contentTypeAttr = elem.getAttribute(RESULT_TYPE_Q);
+            if (contentTypeAttr == null || StringUtils.isBlank(contentTypeAttr.getAttributeValue())) {
+                handleException("The 'result-type' attribute is required when the 'result-target' attribute is present");
+            } else {
+                if ("JSON".equals(contentTypeAttr.getAttributeValue())) {
+                    mediator.setContentType(ForEachMediatorV2.JSON_TYPE);
+                } else if ("XML".equals(contentTypeAttr.getAttributeValue())) {
+                    mediator.setContentType(ForEachMediatorV2.XML_TYPE);
+                } else {
+                    handleException("The 'result-type' attribute should be either 'JSON' or 'XML'");
+                }
+                mediator.setResultTarget(resultTargetAttr.getAttributeValue());
+            }
         }
 
         OMAttribute counterVariableAttr = elem.getAttribute(ATT_COUNTER_VARIABLE);

@@ -24,6 +24,7 @@ import org.apache.synapse.mediators.eip.EIPConstants;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * An instance of this class is created to manage each aggregation group, and it holds
@@ -33,8 +34,8 @@ import java.util.List;
 public class ForEachAggregate {
 
     private final String forLoopMediatorId;
+    private final ReentrantLock lock = new ReentrantLock();
     private List<MessageContext> messages = new ArrayList<>();
-    private boolean locked = false;
     private boolean completed = false;
     private String correlation = null;
 
@@ -125,17 +126,14 @@ public class ForEachAggregate {
 
     public synchronized boolean getLock() {
 
-        // chnage tp lock object
-        if (!locked) {
-            locked = true;
-            return true;
-        }
-        return false;
+        return lock.tryLock();
     }
 
-    public synchronized void releaseLock() {
+    public void releaseLock() {
 
-        locked = false;
+        if (lock.isHeldByCurrentThread()) {
+            lock.unlock();
+        }
     }
 
     public boolean isCompleted() {
