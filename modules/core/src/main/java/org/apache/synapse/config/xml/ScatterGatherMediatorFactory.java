@@ -71,7 +71,8 @@ public class ScatterGatherMediatorFactory extends AbstractMediatorFactory {
 
         boolean asynchronousExe = true;
 
-        ScatterGather mediator = new ScatterGather();
+        OMAttribute id = elem.getAttribute(new QName("id"));
+        ScatterGather mediator = new ScatterGather(id.getAttributeValue());
         processAuditStatus(mediator, elem);
 
         OMAttribute parallelExecAttr = elem.getAttribute(PARALLEL_EXEC_Q);

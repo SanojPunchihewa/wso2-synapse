@@ -106,6 +106,7 @@ public class Aggregate extends TimerTask {
         }
         this.faultHandler = faultHandler;
         this.scatterGatherMediator = scatterGatherMediator;
+        log.info("====== Scatter Gather Mediator Aggregate created :" + this + " ====== " + scatterGatherMediator.getId());
     }
 
     /**
