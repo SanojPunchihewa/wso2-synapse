@@ -29,7 +29,10 @@ import org.apache.synapse.config.xml.SynapsePath;
 import org.apache.synapse.core.SynapseEnvironment;
 import org.apache.synapse.mediators.AbstractMediator;
 import org.apache.synapse.mediators.MediatorProperty;
+import org.apache.synapse.mediators.v2.AbstractClassMediator;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -87,12 +90,16 @@ public class ClassMediator extends AbstractMediator implements ManagedLifecycle 
         boolean result;
 
         try {
-            if (hasDynamicProperties) {
-                synchronized (mediator) {
+            if (mediator instanceof AbstractClassMediator) {
+                result = invokeClassMediatorV2(synCtx);
+            } else {
+                if (hasDynamicProperties) {
+                    synchronized (mediator) {
+                        result = updateInstancePropertiesAndMediate(synCtx);
+                    }
+                } else {
                     result = updateInstancePropertiesAndMediate(synCtx);
                 }
-            } else {
-                result = updateInstancePropertiesAndMediate(synCtx);
             }
         } catch (Exception e) {
             // throw Synapse Exception for any exception in class meditor
@@ -103,6 +110,34 @@ public class ClassMediator extends AbstractMediator implements ManagedLifecycle 
         synLog.traceOrDebug("End : Class mediator");
         
         return result;
+    }
+
+    private boolean invokeClassMediatorV2(MessageContext synCtx) {
+
+        Object[] methodArgs = {"Hello", 42, true};
+        String methodName = "mediate";
+        Method[] methods = mediator.getClass().getMethods();
+        Method targetMethod = null;
+        for (Method method : methods) {
+            if (method.getName().equals(methodName) && method.getParameterCount() == methodArgs.length) {
+                targetMethod = method;
+                break;
+            }
+        }
+
+        if (targetMethod == null) {
+            handleException("No suitable method found for name: " + methodName + " with " + methodArgs.length
+                    + " arguments for class " + mediator.getClass().getSimpleName(), synCtx);
+        }
+        targetMethod.setAccessible(true);
+        try {
+            Object result = targetMethod.invoke(mediator, methodArgs);
+            log.info("ClassMediatorV2 Result: " + result);
+            return true;
+        } catch (IllegalAccessException | InvocationTargetException e) {
+            handleException("Error while invoking method: " + methodName + " in class " + mediator.getClass().getSimpleName(), e, synCtx);
+        }
+        return false;
     }
 
     public void destroy() {
