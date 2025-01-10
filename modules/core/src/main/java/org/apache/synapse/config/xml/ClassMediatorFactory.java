@@ -25,9 +25,17 @@ import org.apache.synapse.Mediator;
 import org.apache.synapse.SynapseException;
 import org.apache.synapse.SynapseConstants;
 import org.apache.synapse.mediators.ext.ClassMediator;
+import org.apache.synapse.mediators.v2.AbstractClassMediator;
+import org.apache.synapse.mediators.v2.Argument;
+import org.jaxen.JaxenException;
 
 import javax.xml.namespace.QName;
+import java.lang.reflect.Method;
+import java.lang.reflect.Parameter;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
@@ -114,7 +122,49 @@ public class ClassMediatorFactory extends AbstractMediatorFactory {
             throw new SynapseException(msg, e);
         }
 
-        classMediator.addAllProperties(MediatorPropertyFactory.getMediatorProperties(elem, mediator));
+        if (elem.getAttribute(new QName("version")) != null && elem.getAttribute(new QName("version")).getAttributeValue().equals("2")) {
+            OMElement inputArgsElement = elem.getFirstChildWithName(new QName(XMLConfigConstants.SYNAPSE_NAMESPACE, "inputs"));
+            if (inputArgsElement != null) {
+                HashMap<String, Argument> inputArgsMap = new HashMap();
+                Iterator inputIterator = inputArgsElement.getChildrenWithName(new QName("argument"));
+                while (inputIterator.hasNext()) {
+                    OMElement inputElement = (OMElement) inputIterator.next();
+                    String nameAttribute = inputElement.getAttributeValue(new QName("name"));
+                    String typeAttribute = inputElement.getAttributeValue(new QName("type"));
+                    String valueAttribute = inputElement.getAttributeValue(new QName("value"));
+                    String expressionAttribute = inputElement.getAttributeValue(new QName("expression"));
+                    Argument argument = new Argument();
+                    if (valueAttribute != null) {
+                        argument.setValue(valueAttribute, typeAttribute);
+                    } else if (expressionAttribute != null) {
+                        try {
+                            argument.setExpression(SynapsePathFactory.getSynapsePath(inputElement, new QName("expression")), typeAttribute);
+                        } catch (JaxenException e) {
+                            handleException("Error setting expression : " + expressionAttribute + " as an expression property into class mediator : " + clazz.getName() + " : " + e.getMessage(), e);
+                        }
+                    }
+                    inputArgsMap.put(nameAttribute, argument);
+                }
+                classMediator.setInputArguments(inputArgsMap);
+            }
+
+            Method[] methods = clazz.getMethods();
+            for (Method method : methods) {
+                if (method.getName().equals("mediate")) {
+                    List<AbstractClassMediator.Arg> arguments = new ArrayList<>();
+                    for (Parameter parameter : method.getParameters()) {
+                        if (parameter.isAnnotationPresent(AbstractClassMediator.Arg.class)) {
+                            AbstractClassMediator.Arg arg = parameter.getAnnotation(AbstractClassMediator.Arg.class);
+                            arguments.add(arg);
+                        }
+                    }
+                    classMediator.setArguments(arguments);
+                    break;
+                }
+            }
+        } else {
+            classMediator.addAllProperties(MediatorPropertyFactory.getMediatorProperties(elem, mediator));
+        }
 
         // after successfully creating the mediator
         // set its common attributes such as tracing etc

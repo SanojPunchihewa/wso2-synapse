@@ -30,10 +30,13 @@ import org.apache.synapse.core.SynapseEnvironment;
 import org.apache.synapse.mediators.AbstractMediator;
 import org.apache.synapse.mediators.MediatorProperty;
 import org.apache.synapse.mediators.v2.AbstractClassMediator;
+import org.apache.synapse.mediators.v2.Argument;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Parameter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 
 /**
@@ -48,6 +51,9 @@ import java.util.List;
  * @see Mediator
  */
 public class ClassMediator extends AbstractMediator implements ManagedLifecycle {
+
+    private List<AbstractClassMediator.Arg> arguments;
+    private HashMap<String, Argument> inputArguments;
 
     /** The reference to the actual class that implments the Mediator interface */
     private Mediator mediator = null;
@@ -114,24 +120,26 @@ public class ClassMediator extends AbstractMediator implements ManagedLifecycle 
 
     private boolean invokeClassMediatorV2(MessageContext synCtx) {
 
-        Object[] methodArgs = {"Hello", 42, true};
+        List<Object> methodArgs = new ArrayList<>();
+
+        arguments.forEach(arg -> methodArgs.add(getArgument(synCtx, arg.name())));
+
         String methodName = "mediate";
         Method[] methods = mediator.getClass().getMethods();
         Method targetMethod = null;
         for (Method method : methods) {
-            if (method.getName().equals(methodName) && method.getParameterCount() == methodArgs.length) {
+            if (method.getName().equals(methodName) && method.getParameterCount() == methodArgs.size()) {
                 targetMethod = method;
                 break;
             }
         }
 
         if (targetMethod == null) {
-            handleException("No suitable method found for name: " + methodName + " with " + methodArgs.length
+            handleException("No suitable method found for name: " + methodName + " with " + methodArgs.size()
                     + " arguments for class " + mediator.getClass().getSimpleName(), synCtx);
         }
-        targetMethod.setAccessible(true);
         try {
-            Object result = targetMethod.invoke(mediator, methodArgs);
+            Object result = targetMethod.invoke(mediator, methodArgs.toArray());
             log.info("ClassMediatorV2 Result: " + result);
             return true;
         } catch (IllegalAccessException | InvocationTargetException e) {
@@ -215,5 +223,23 @@ public class ClassMediator extends AbstractMediator implements ManagedLifecycle 
             }
         }
         return mediator.mediate(synCtx);
+    }
+
+
+    private Object getArgument(MessageContext context, String argName) {
+
+        if (inputArguments.containsKey(argName)) {
+            return inputArguments.get(argName).getResolvedArgument(context);
+        }
+        return null;
+    }
+
+    public void setInputArguments(HashMap<String, Argument> inputArguments) {
+
+        this.inputArguments = inputArguments;
+    }
+
+    public void setArguments(List<AbstractClassMediator.Arg> arguments) {
+        this.arguments = arguments;
     }
 }

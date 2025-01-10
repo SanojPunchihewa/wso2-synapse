@@ -18,8 +18,17 @@
 
 package org.apache.synapse.mediators.v2;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonSyntaxException;
+import org.apache.axiom.om.OMElement;
+import org.apache.axis2.util.JavaUtils;
+import org.apache.commons.logging.Log;
 import org.apache.synapse.MessageContext;
 import org.apache.synapse.SynapseConstants;
+import org.apache.synapse.SynapseException;
+import org.apache.synapse.config.SynapseConfigUtils;
+import org.apache.synapse.config.xml.XMLConfigConstants;
 
 public class ScatterGatherUtils {
 
@@ -46,5 +55,71 @@ public class ScatterGatherUtils {
         Boolean isContinuationTriggeredMediatorWorker =
                 (Boolean) synCtx.getProperty(SynapseConstants.CONTINUE_FLOW_TRIGGERED_FROM_MEDIATOR_WORKER);
         return isContinuationTriggeredMediatorWorker != null && isContinuationTriggeredMediatorWorker;
+    }
+
+    public static Object convertValue(String value, String type, Log log) {
+
+        if (type == null) {
+            return value;
+        }
+
+        try {
+            XMLConfigConstants.DATA_TYPES dataType = XMLConfigConstants.DATA_TYPES.valueOf(type);
+            switch (dataType) {
+                case BOOLEAN:
+                    return JavaUtils.isTrueExplicitly(value);
+                case DOUBLE:
+                    return Double.parseDouble(value);
+                case FLOAT:
+                    return Float.parseFloat(value);
+                case INTEGER:
+                    return Integer.parseInt(value);
+                case LONG:
+                    return Long.parseLong(value);
+                case OM:
+                    return buildOMElement(value);
+                case SHORT:
+                    return Short.parseShort(value);
+                case JSON:
+                    return buildJSONElement(value, log);
+                default:
+                    return value;
+            }
+        } catch (IllegalArgumentException e) {
+            String msg = "Unknown type : " + type + " for the variable mediator or the " +
+                    "variable value cannot be converted into the specified type.";
+            log.error(msg, e);
+            throw new SynapseException(msg, e);
+        }
+    }
+
+
+    public static OMElement buildOMElement(String xml) {
+
+        if (xml == null) {
+            return null;
+        }
+        OMElement result = SynapseConfigUtils.stringToOM(xml);
+        result.buildWithAttachments();
+        return result;
+    }
+
+    private static JsonElement buildJSONElement(String jsonPayload, Log log) {
+
+        JsonParser jsonParser = new JsonParser();
+        try {
+            return jsonParser.parse(jsonPayload);
+        } catch (JsonSyntaxException ex) {
+            // Enclosing using quotes due to the following issue
+            // https://github.com/google/gson/issues/1286
+            String enclosed = "\"" + jsonPayload + "\"";
+            try {
+                return jsonParser.parse(enclosed);
+            } catch (JsonSyntaxException e) {
+                // log the original exception and discard the new exception
+                log.error("Malformed JSON payload : " + jsonPayload, ex);
+                return null;
+            }
+        }
     }
 }

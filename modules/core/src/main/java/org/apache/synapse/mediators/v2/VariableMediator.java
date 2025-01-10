@@ -127,7 +127,7 @@ public class VariableMediator extends AbstractMediator {
     public void setValue(String value, String type) {
 
         this.type = type;
-        this.value = convertValue(value, type);
+        this.value = ScatterGatherUtils.convertValue(value, type, log);
     }
 
     public String getType() {
@@ -170,7 +170,7 @@ public class VariableMediator extends AbstractMediator {
         } else {
             if (expression != null) {
                 if (isOMType(type)) {
-                    return buildOMElement(expression.stringValueOf(synCtx));
+                    return ScatterGatherUtils.buildOMElement(expression.stringValueOf(synCtx));
                 } else if (isStringType(type)) {
                     return expression.stringValueOf(synCtx);
                 }
@@ -188,42 +188,6 @@ public class VariableMediator extends AbstractMediator {
     private boolean isStringType(String type) {
 
         return type != null && XMLConfigConstants.DATA_TYPES.STRING.equals(XMLConfigConstants.DATA_TYPES.valueOf(type));
-    }
-
-    private Object convertValue(String value, String type) {
-
-        if (type == null) {
-            return value;
-        }
-
-        try {
-            XMLConfigConstants.DATA_TYPES dataType = XMLConfigConstants.DATA_TYPES.valueOf(type);
-            switch (dataType) {
-                case BOOLEAN:
-                    return JavaUtils.isTrueExplicitly(value);
-                case DOUBLE:
-                    return Double.parseDouble(value);
-                case FLOAT:
-                    return Float.parseFloat(value);
-                case INTEGER:
-                    return Integer.parseInt(value);
-                case LONG:
-                    return Long.parseLong(value);
-                case OM:
-                    return buildOMElement(value);
-                case SHORT:
-                    return Short.parseShort(value);
-                case JSON:
-                    return buildJSONElement(value);
-                default:
-                    return value;
-            }
-        } catch (IllegalArgumentException e) {
-            String msg = "Unknown type : " + type + " for the variable mediator or the " +
-                    "variable value cannot be converted into the specified type.";
-            log.error(msg, e);
-            throw new SynapseException(msg, e);
-        }
     }
 
     /**
@@ -363,35 +327,6 @@ public class VariableMediator extends AbstractMediator {
             contentAware = expression.isContentAware();
         }
         return contentAware;
-    }
-
-    private OMElement buildOMElement(String xml) {
-
-        if (xml == null) {
-            return null;
-        }
-        OMElement result = SynapseConfigUtils.stringToOM(xml);
-        result.buildWithAttachments();
-        return result;
-    }
-
-    private JsonElement buildJSONElement(String jsonPayload) {
-
-        JsonParser jsonParser = new JsonParser();
-        try {
-            return jsonParser.parse(jsonPayload);
-        } catch (JsonSyntaxException ex) {
-            // Enclosing using quotes due to the following issue
-            // https://github.com/google/gson/issues/1286
-            String enclosed = "\"" + jsonPayload + "\"";
-            try {
-                return jsonParser.parse(enclosed);
-            } catch (JsonSyntaxException e) {
-                // log the original exception and discard the new exception
-                log.error("Malformed JSON payload : " + jsonPayload, ex);
-                return null;
-            }
-        }
     }
 
     @Override
