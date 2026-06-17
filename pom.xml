@@ -1917,16 +1917,16 @@
          </releases>
       </pluginRepository>
    </pluginRepositories>
-   <distributionManagement>
-      <snapshotRepository>
-         <id>wso2.snapshots</id>
-         <name>Apache Snapshot Repository</name>
-         <url>https://maven.wso2.org/nexus/content/repositories/snapshots/</url>
-      </snapshotRepository>
-      <repository>
-         <id>nexus-releases</id>
-         <name>WSO2 Release Distribution Repository</name>
-         <url>https://maven.wso2.org/nexus/service/local/staging/deploy/maven2/</url>
-      </repository>
-   </distributionManagement>
+<!--   <distributionManagement>-->
+<!--      <snapshotRepository>-->
+<!--         <id>wso2.snapshots</id>-->
+<!--         <name>Apache Snapshot Repository</name>-->
+<!--         <url>https://maven.wso2.org/nexus/content/repositories/snapshots/</url>-->
+<!--      </snapshotRepository>-->
+<!--      <repository>-->
+<!--         <id>nexus-releases</id>-->
+<!--         <name>WSO2 Release Distribution Repository</name>-->
+<!--         <url>https://maven.wso2.org/nexus/service/local/staging/deploy/maven2/</url>-->
+<!--      </repository>-->
+<!--   </distributionManagement>-->
 </project>
