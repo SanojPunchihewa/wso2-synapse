@@ -30,6 +30,7 @@ import org.apache.axis2.transport.TransportUtils;
 import org.apache.axis2.transport.http.*;
 import org.apache.axis2.util.JavaUtils;
 import org.apache.axis2.util.MessageProcessorSelector;
+import org.apache.commons.compress.compressors.brotli.BrotliCompressorInputStream;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.http.protocol.HTTP;
@@ -39,9 +40,11 @@ import javax.xml.stream.XMLStreamException;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.PushbackInputStream;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.zip.GZIPInputStream;
 
 public class DeferredMessageBuilder {
 
@@ -87,6 +90,21 @@ public class DeferredMessageBuilder {
         return formatters;
     }
 
+    public static InputStream handleBrotli(MessageContext msgContext, InputStream in) throws IOException {
+        Map headers = (Map)msgContext.getProperty("TRANSPORT_HEADERS");
+        if (headers != null && ("br".equals(headers.get("Content-Encoding")) || "br".equals(headers.get(HTTPConstants.HEADER_CONTENT_ENCODING_LOWERCASE)))) {
+            PushbackInputStream pushbackInputStream = new PushbackInputStream(in);
+            int bytesRead = pushbackInputStream.read();
+            if (bytesRead != -1) {
+                pushbackInputStream.unread(bytesRead);
+                return new BrotliCompressorInputStream(pushbackInputStream);
+            }
+        } else if (headers != null && ("gzip".equals(headers.get("Content-Encoding")) || "gzip".equals(headers.get(HTTPConstants.HEADER_CONTENT_ENCODING_LOWERCASE)))) {
+            return HTTPTransportUtils.handleGZip(msgContext, in);
+        }
+        return in;
+    }
+
     public OMElement getDocument(MessageContext msgCtx, InputStream in) throws
             XMLStreamException, IOException {
 
@@ -102,7 +120,7 @@ public class DeferredMessageBuilder {
     	
 		String contentType = (String) msgCtx.getProperty(Constants.Configuration.CONTENT_TYPE);
 		String _contentType = getContentType(contentType, msgCtx);
-		in = HTTPTransportUtils.handleGZip(msgCtx, in);
+		in = handleBrotli(msgCtx, in);
 
 		AxisConfiguration configuration = msgCtx.getConfigurationContext().getAxisConfiguration();
 		Parameter useFallbackParameter =
